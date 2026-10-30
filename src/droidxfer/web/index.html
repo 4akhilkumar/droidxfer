@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>droidxfer</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <script type="module" src="/static/js/app.js"></script>
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">droid<span>xfer</span></div>
+    <div class="device-picker">
+      <label for="device-select">Device</label>
+      <select id="device-select"></select>
+      <span id="device-badge" class="badge"></span>
+    </div>
+    <span id="adb-status" class="badge error" hidden></span>
+    <span id="conn-lost" class="badge warn" hidden>Reconnecting&hellip;</span>
+    <div class="spacer"></div>
+    <button id="btn-wireless" class="btn" type="button">Wi-Fi&hellip;</button>
+    <button id="btn-settings" class="btn" type="button">Settings</button>
+  </header>
+
+  <main class="panes">
+    <section id="pane-mac" class="pane" aria-label="Mac files"></section>
+    <div class="middle">
+      <button id="btn-to-android" class="btn primary arrow" type="button" title="Copy selected Mac items to the Android folder" disabled>&rarr;</button>
+      <button id="btn-to-mac" class="btn primary arrow" type="button" title="Copy selected Android items to the Mac folder" disabled>&larr;</button>
+    </div>
+    <section id="pane-android" class="pane" aria-label="Android files"></section>
+  </main>
+
+  <div id="upload-banner" class="upload-banner" hidden></div>
+
+  <section id="transfers" class="transfers">
+    <div class="transfers-head">
+      <button id="transfers-toggle" class="link" type="button">Transfers <span id="transfers-count"></span></button>
+      <div class="spacer"></div>
+      <button id="btn-clear" class="btn small" type="button">Clear finished</button>
+    </div>
+    <div id="transfers-list" class="transfers-list"></div>
+  </section>
+
+  <div id="toasts" class="toasts" aria-live="polite"></div>
+
+  <div id="locked" class="locked" hidden>
+    <div class="locked-box">
+      <h2>Session expired</h2>
+      <p>Open the link printed in the terminal by <code>droidxfer serve</code> (it contains a one-time access token).</p>
+    </div>
+  </div>
+
+  <dialog id="dlg-prompt">
+    <form>
+      <h3 data-title></h3>
+      <label class="field"><span data-label></span><input name="value" required autocomplete="off" spellcheck="false"></label>
+      <div class="actions">
+        <button type="button" class="btn" data-cancel>Cancel</button>
+        <button type="submit" class="btn primary" data-ok>OK</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="dlg-confirm">
+    <form>
+      <h3 data-title></h3>
+      <p data-message class="message"></p>
+      <div class="actions">
+        <button type="button" class="btn" data-cancel>Cancel</button>
+        <button type="submit" class="btn primary" data-ok>OK</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="dlg-transfer">
+    <form>
+      <h3>Copy files</h3>
+      <p data-summary class="message"></p>
+      <fieldset>
+        <legend>If a file with the same name already exists</legend>
+        <label class="radio"><input type="radio" name="conflict" value="rename"> Keep both (add a number to the new file)</label>
+        <label class="radio"><input type="radio" name="conflict" value="overwrite"> Replace it</label>
+        <label class="radio"><input type="radio" name="conflict" value="skip"> Skip it</label>
+      </fieldset>
+      <label class="check"><input type="checkbox" name="verify"> Verify each file with an MD5 checksum (slower)</label>
+      <label class="check"><input type="checkbox" name="remember"> Remember this choice and don't ask again</label>
+      <div class="actions">
+        <button type="button" class="btn" data-cancel>Cancel</button>
+        <button type="submit" class="btn primary" data-ok>Copy</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="dlg-settings">
+    <form>
+      <h3>Settings</h3>
+      <label class="field"><span>When a file already exists</span>
+        <select name="default_conflict">
+          <option value="rename">Keep both</option>
+          <option value="overwrite">Replace</option>
+          <option value="skip">Skip</option>
+        </select>
+      </label>
+      <label class="check"><input type="checkbox" name="ask_before_transfer"> Ask before every transfer</label>
+      <label class="check"><input type="checkbox" name="verify_checksum"> Verify files with MD5 checksums</label>
+      <label class="check"><input type="checkbox" name="media_scan"> Make copied photos/videos show up in the phone's Gallery right away</label>
+      <label class="check"><input type="checkbox" name="prefer_usb"> Prefer USB when the phone is connected by both USB and Wi-Fi</label>
+      <label class="check"><input type="checkbox" name="show_hidden"> Show hidden files</label>
+      <label class="field"><span>adb path (leave empty to detect automatically)</span><input name="adb_path" spellcheck="false" placeholder="/opt/homebrew/bin/adb"></label>
+      <div class="actions">
+        <button type="button" class="btn" data-cancel>Cancel</button>
+        <button type="submit" class="btn primary" data-ok>Save</button>
+      </div>
+    </form>
+  </dialog>
+
+  <dialog id="dlg-wireless" class="wide">
+    <div class="dlg-head">
+      <h3>Connect over Wi-Fi</h3>
+      <button type="button" class="btn small" data-close>Close</button>
+    </div>
+    <nav class="tabs">
+      <button type="button" data-tab="qr">QR code</button>
+      <button type="button" data-tab="code">Pairing code</button>
+      <button type="button" data-tab="connect">Connect</button>
+      <button type="button" data-tab="usb">From USB</button>
+    </nav>
+
+    <section data-panel="qr">
+      <p class="hint">On the phone, open <b>Settings &rsaquo; System &rsaquo; Developer options &rsaquo; Wireless debugging</b>, turn it on and tap <b>Pair device with QR code</b>. The phone and the Mac must be on the same Wi-Fi network.</p>
+      <div id="qr-box" class="qr-box"></div>
+      <div id="qr-status" class="status-line"></div>
+      <button id="qr-start" type="button" class="btn primary">Show QR code</button>
+    </section>
+
+    <section data-panel="code" hidden>
+      <p class="hint">In <b>Wireless debugging</b>, tap <b>Pair device with pairing code</b> and enter the IP address, port and 6-digit code shown on the phone.</p>
+      <form id="form-pair" class="row-form">
+        <label>IP address<input name="host" required placeholder="192.168.1.20" spellcheck="false"></label>
+        <label>Port<input name="port" type="number" min="1" max="65535" required></label>
+        <label>Pairing code<input name="code" required inputmode="numeric" autocomplete="one-time-code"></label>
+        <button type="submit" class="btn primary">Pair</button>
+      </form>
+      <p class="hint">After pairing, go to the <b>Connect</b> tab and use the IP address &amp; port from the main Wireless debugging screen (a different port from pairing). Paired phones usually reconnect automatically.</p>
+    </section>
+
+    <section data-panel="connect" hidden>
+      <form id="form-connect" class="row-form">
+        <label>IP address<input name="host" required placeholder="192.168.1.20" spellcheck="false"></label>
+        <label>Port<input name="port" type="number" min="1" max="65535" required></label>
+        <button type="submit" class="btn primary">Connect</button>
+      </form>
+      <h4>Found on this network <button id="btn-discover" type="button" class="btn small">Scan again</button></h4>
+      <ul id="discover-list" class="simple-list"></ul>
+      <h4>Recent</h4>
+      <ul id="known-list" class="simple-list"></ul>
+      <h4>Connected over Wi-Fi</h4>
+      <ul id="wifi-list" class="simple-list"></ul>
+    </section>
+
+    <section data-panel="usb" hidden>
+      <p class="hint">Switch the selected USB-connected phone to adb over Wi-Fi (TCP port 5555) and connect to it. You can then unplug the cable. This lasts until the phone restarts. On Android 11 and later, the QR code method is usually better.</p>
+      <div id="usb-device" class="status-line"></div>
+      <button id="btn-tcpip" type="button" class="btn primary">Switch to Wi-Fi</button>
+    </section>
+  </dialog>
+</body>
+</html>

@@ -1,0 +1,37 @@
+[project]
+name = "droidxfer"
+version = "0.1.0"
+description = "Transfer files between macOS and Android over ADB (USB or Wi-Fi) with a local web UI and CLI."
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "typer>=0.12",
+    "rich>=13.7",
+    "pillow>=10.4",
+    "segno>=1.6",
+]
+
+[project.scripts]
+droidxfer = "droidxfer.cli:app"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "httpx>=0.27",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/droidxfer"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+filterwarnings = ["ignore:Using `httpx` with `starlette.testclient`:DeprecationWarning"]
