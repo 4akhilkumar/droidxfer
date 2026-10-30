@@ -62,8 +62,9 @@ export async function uploadFile(uploadId, rel, file) {
 export function connectEvents(onEvent, onStatus) {
   let delay = 500;
   let socket;
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const open = () => {
-    socket = new WebSocket(`ws://${location.host}/api/events`);
+    socket = new WebSocket(`${proto}//${location.host}/api/events`);
     socket.addEventListener('open', () => {
       delay = 500;
       onStatus(true);

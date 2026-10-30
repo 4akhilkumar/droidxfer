@@ -35,14 +35,17 @@
 
   <section id="transfers" class="transfers">
     <div class="transfers-head">
-      <button id="transfers-toggle" class="link" type="button">Transfers <span id="transfers-count"></span></button>
+      <button id="transfers-toggle" class="link" type="button">
+        <span class="chevron" aria-hidden="true">&#9662;</span>
+        Transfers <span id="transfers-count"></span>
+      </button>
       <div class="spacer"></div>
       <button id="btn-clear" class="btn small" type="button">Clear finished</button>
     </div>
     <div id="transfers-list" class="transfers-list"></div>
   </section>
 
-  <div id="toasts" class="toasts" aria-live="polite"></div>
+  <div id="toasts" class="toasts" aria-live="polite" popover="manual"></div>
 
   <div id="locked" class="locked" hidden>
     <div class="locked-box">

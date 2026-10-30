@@ -43,10 +43,11 @@ export class FilePane {
     } });
 
     this.upBtn = btn('up', 'Enclosing folder (Cmd+Up)', () => this.goUp());
-    this.crumbs = el('div', { class: 'crumbs', title: 'Click empty space to type a path' });
+    this.crumbs = el('div', { class: 'crumbs', title: 'Click empty space or double-click to type a path' });
     this.crumbs.addEventListener('click', (e) => {
       if (e.target === this.crumbs) this.editPath();
     });
+    this.crumbs.addEventListener('dblclick', () => this.editPath());
     this.pathInput = el('input', { class: 'path-input', hidden: true, spellcheck: 'false', autocomplete: 'off' });
     this.pathInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
@@ -174,6 +175,7 @@ export class FilePane {
   }
 
   editPath() {
+    if (!this.path) return;
     this.crumbs.hidden = true;
     this.pathInput.hidden = false;
     this.pathInput.value = this.path || '';
@@ -248,6 +250,9 @@ export class FilePane {
       this.crumbs.append(crumb);
     });
     this.upBtn.disabled = !this.parent;
+    requestAnimationFrame(() => {
+      this.crumbs.scrollLeft = this.crumbs.scrollWidth;
+    });
   }
 
   renderList() {
@@ -485,7 +490,9 @@ export class FilePane {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
     const { row } = this.dropTarget(e);
-    this.body.classList.add('drop-target');
+    // Folder under cursor -> highlight only that folder.
+    // Anywhere else -> highlight the whole pane (drop goes to the current folder).
+    this.body.classList.toggle('drop-target', !row);
     for (const r of this.body.querySelectorAll('.drop-row')) if (r !== row) r.classList.remove('drop-row');
     row?.classList.add('drop-row');
   }

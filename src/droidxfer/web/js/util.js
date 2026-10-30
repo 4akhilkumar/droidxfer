@@ -123,10 +123,25 @@ export function store(key, value) {
   }
 }
 
+function raiseToasts(host) {
+  if (typeof host.showPopover !== 'function') return;   // older browsers: normal layer
+  try {
+    if (!host.matches(':popover-open')) {
+      host.showPopover();
+    } else if (document.querySelector('dialog[open]')) {
+      host.hidePopover();      // re-adding moves it to the top of the top layer,
+      host.showPopover();      // above any dialog opened since
+    }
+  } catch {
+    /* fall back to the normal layer */
+  }
+}
+
 export function toast(message, kind = 'info', timeout = 4500) {
   const host = document.getElementById('toasts');
   const node = el('div', { class: `toast ${kind}`, role: kind === 'error' ? 'alert' : 'status' }, message);
   host.append(node);
+  raiseToasts(host);
   setTimeout(() => node.classList.add('leaving'), timeout);
   setTimeout(() => node.remove(), timeout + 400);
 }
