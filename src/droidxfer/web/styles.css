@@ -1359,6 +1359,7 @@ dialog.info { width: min(820px, 96vw); }
 .info-verdict.pass { background: var(--success-soft); }
 .info-verdict.warn { background: var(--warn-soft); }
 .info-verdict.fail { background: var(--danger-soft); }
+.info-verdict.unknown { background: var(--panel-2); border: 1px solid var(--border); }
 
 .info-mark {
   flex: none;

@@ -95,7 +95,25 @@ tests/        fake_adb.py (in-process fake adb server) + tests
   generic system image legitimately has product "generic_system"). Verified on the Pixel 7 Pro: all checks pass,
   494 cycles, 4,436/5,002 mAh (89%), battery made 2024-03-09. 73 tests passing.
 
+- Session 4 (2026-11-11): MTP ("File transfer" mode, no USB debugging). Pure Python: pyusb + libusb-package (pip
+  wheels bundle libusb; no Homebrew). New package `src/droidxfer/mtp/`: protocol.py (containers, datasets, prop
+  lists), usblink.py (pyusb link + scan; never claims the interface while scanning; "PTP"-labelled interfaces are
+  photo-only), session.py (worker-thread transactions, cancel/recover with USB port reset fallback, virtual paths:
+  first storage = /sdcard plus /storage/emulated/0 aliases, others /storage/<name>), fs.py (MtpFS + MtpSync, which
+  stands in for adb's SyncConnection in the transfer engine). core/mtpdevices.py polls USB every 2 s, opens a
+  session lazily, closes it after 30 s idle or on unplug. Transport kind "mtp", grouped with adb by USB serial;
+  adb preferred. Live-verified on the Pixel 7 Pro with USB debugging OFF: CLI push/ls/pull round trip identical
+  with dates kept, skip_identical incremental, info (reduced), web UI browse/thumbnails/viewer seek (0.1 s),
+  copy from the UI, delete. Raw speed (USB 3): ~200 MB/s up, ~230 MB/s down (8 MB GetPartialObject64 chunks).
+  Gotchas found live: (1) every non-final bulk write in a data phase must be whole max-packet multiples, else the
+  phone stalls (needs USB reset); (2) GetObjectInfo per file is ~21 ms -> list folders with one
+  GetObjectPropList per property (Pixel rejects 0xFFFFFFFF "all props" with 0xA801); prop list with depth 1
+  includes the folder itself; storage root = parent 0; (3) a crashed client leaves the phone's session open
+  (0x201E) -> CloseSession + OpenSession; (4) MTP keeps the ObjectInfo modification date on disk (local time).
+  96 tests passing (fake MTP device in tests/fake_mtp.py enforces the short-packet rule).
+
 ## Possible next steps / ideas
+- Option to prefer MTP for transfers even when adb is available (about 5x faster on USB 3).
 - Tune throughput (IO_CHUNK, SYNC_DATA_MAX); check Range/HEIC on a Samsung phone and in Safari.
 - sendrecv_v2 compression; pipelining many small files; stream Finder drops straight to the phone instead of staging.
 - Optional spec table per model (expected chip/RAM/storage) to strengthen the authenticity verdict.

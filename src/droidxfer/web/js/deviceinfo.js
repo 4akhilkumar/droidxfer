@@ -4,7 +4,7 @@ import { api } from './api.js';
 import { el, toast } from './util.js';
 
 const MARK = { pass: '✓', warn: '!', fail: '✕', unknown: '?' };
-const VERDICT = { pass: 'Looks genuine', warn: 'Needs attention', fail: 'Possible tampering' };
+const VERDICT = { pass: 'Looks genuine', warn: 'Needs attention', fail: 'Possible tampering', unknown: 'Not checked' };
 
 export class DeviceInfoDialog {
   constructor() {
@@ -93,8 +93,7 @@ export class DeviceInfoDialog {
     const notes = el('ul', { class: 'info-notes' }, report.notes.map((n) => el('li', {}, n)));
     this.body.replaceChildren(
       banner,
-      el('h4', {}, 'Authenticity'),
-      checks,
+      ...(report.checks.length ? [el('h4', {}, 'Authenticity'), checks] : []),
       el('div', { class: 'info-grid' }, sections),
       notes,
     );

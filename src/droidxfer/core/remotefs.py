@@ -6,13 +6,17 @@ import posixpath
 import shlex
 import stat as statmod
 from dataclasses import dataclass
-from typing import AsyncIterator
+from typing import TYPE_CHECKING, AsyncIterator
 from urllib.parse import quote as url_quote
 
 from ..adb import AdbClient, RemoteStat, ShellResult, SyncConnection
 from ..adb.protocol import AdbCommandError
 from .devices import DeviceManager
+from ..mtp import MtpFS, MtpSync
 from .paths import PathError, check_remote_mutable, normalize_remote, remote_join
+
+if TYPE_CHECKING:
+    from .mtpdevices import MtpManager
 
 MAX_SHELL_CMD = 32 * 1024
 MEDIA_EXTS = frozenset(
@@ -24,6 +28,12 @@ SHARED_STORAGE_PREFIXES = ("/sdcard/", "/storage/")
 
 class RemoteOpError(Exception):
     pass
+
+
+NEEDS_ADB = (
+    "this needs USB debugging. The phone is connected in File transfer (MTP) mode, which only gives "
+    "access to files."
+)
 
 
 @dataclass(slots=True)
@@ -52,16 +62,33 @@ def _batches(prefix: str, args: list[str]) -> list[str]:
 
 
 class RemoteFS:
-    def __init__(self, client: AdbClient, devices: DeviceManager) -> None:
+    def __init__(self, client: AdbClient, devices: DeviceManager, mtp: "MtpManager | None" = None) -> None:
         self.client = client
         self.devices = devices
+        self.mtp = mtp
 
-    async def sync(self, device_id: str) -> SyncConnection:
+    async def _mtp(self, device_id: str) -> MtpFS | None:
+        """The MTP file system when the phone is reached over MTP (File transfer mode), else None."""
+        t = self.devices.transport(device_id)
+        if t.kind != "mtp":
+            return None
+        if self.mtp is None:
+            raise RemoteOpError("MTP support is not available")
+        return await self.mtp.fs(t)
+
+    def uses_mtp(self, device_id: str) -> bool:
+        return self.devices.transport(device_id).kind == "mtp"
+
+    async def sync(self, device_id: str) -> SyncConnection | MtpSync:
+        if fs := await self._mtp(device_id):
+            return MtpSync(fs)
         t = self.devices.transport(device_id)
         return await self.client.sync(t.serial, t.features)
 
     async def shell(self, device_id: str, command: str, timeout: float = 120) -> ShellResult:
         t = self.devices.transport(device_id)
+        if t.kind == "mtp":
+            raise RemoteOpError(NEEDS_ADB)
         return await self.client.shell(t.serial, command, v2="shell_v2" in t.features, timeout=timeout)
 
     async def _checked(self, device_id: str, command: str) -> ShellResult:
@@ -72,11 +99,15 @@ class RemoteFS:
         return res
 
     async def stat(self, device_id: str, path: str) -> RemoteStat | None:
+        if fs := await self._mtp(device_id):
+            return await fs.stat(normalize_remote(path))
         async with await self.sync(device_id) as sc:
             return await sc.stat(normalize_remote(path))
 
     async def list(self, device_id: str, path: str, *, show_hidden: bool = False) -> dict:
         path = normalize_remote(path)
+        if fs := await self._mtp(device_id):
+            return await fs.listing(path, show_hidden=show_hidden)
         entries = []
         async with await self.sync(device_id) as sc:
             st = await sc.stat(path)
@@ -113,16 +144,24 @@ class RemoteFS:
 
     async def mkdir(self, device_id: str, parent: str, name: str) -> str:
         target = remote_join(parent, name)
+        if fs := await self._mtp(device_id):
+            return await fs.mkdir(normalize_remote(parent), name)
         await self._checked(device_id, f"mkdir -- {_q(target)}")
         return target
 
     async def mkdirs(self, device_id: str, paths: list[str]) -> None:
+        if fs := await self._mtp(device_id):
+            return await fs.mkdirs([normalize_remote(p) for p in paths])
         for command in _batches("mkdir -p --", [normalize_remote(p) for p in paths]):
             await self._checked(device_id, command)
 
     async def rename(self, device_id: str, path: str, new_name: str) -> str:
         src = check_remote_mutable(path)
         dst = remote_join(posixpath.dirname(src), new_name)
+        if fs := await self._mtp(device_id):
+            if await fs.stat(dst) is not None:
+                raise FileExistsError(dst)
+            return await fs.rename(src, new_name)
         if await self.stat(device_id, dst) is not None:
             raise FileExistsError(dst)
         await self._checked(device_id, f"mv -- {_q(src)} {_q(dst)}")
@@ -132,12 +171,17 @@ class RemoteFS:
         targets = [check_remote_mutable(p) for p in paths]
         if not targets:
             raise PathError("nothing to delete")
+        if fs := await self._mtp(device_id):
+            await fs.delete(targets)
+            return targets
         for command in _batches("rm -rf --", targets):
             await self._checked(device_id, command)
         return targets
 
     async def remove_quietly(self, device_id: str, path: str) -> None:
         try:
+            if fs := await self._mtp(device_id):
+                return await fs.remove_quietly(normalize_remote(path))
             await self.shell(device_id, f"rm -f -- {_q(normalize_remote(path))}", timeout=15)
         except Exception:
             pass
@@ -151,6 +195,8 @@ class RemoteFS:
 
     async def media_scan(self, device_id: str, paths: list[str]) -> None:
         """Ask MediaStore to index pushed media so it appears in Gallery/Photos right away."""
+        if self.uses_mtp(device_id):
+            return  # files written over MTP go through MediaStore and are indexed automatically
         targets = [
             p for p in paths
             if p.startswith(SHARED_STORAGE_PREFIXES) and posixpath.splitext(p)[1].lower() in MEDIA_EXTS
@@ -195,6 +241,10 @@ class RemoteFS:
 
     async def iter_file(self, device_id: str, path: str) -> AsyncIterator[bytes]:
         path = normalize_remote(path)
+        if fs := await self._mtp(device_id):
+            async for chunk in fs.iter_range(path):
+                yield chunk
+            return
         sc = await self.sync(device_id)
         try:
             async for chunk in sc.iter_pull(path):
@@ -206,6 +256,10 @@ class RemoteFS:
     async def iter_range(self, device_id: str, path: str, start: int, length: int) -> AsyncIterator[bytes]:
         """Yield `length` bytes of a remote file starting at `start` (for HTTP Range requests)."""
         path = normalize_remote(path)
+        if fs := await self._mtp(device_id):
+            async for chunk in fs.iter_range(path, start, length):
+                yield chunk
+            return
         remaining = length
         if start == 0:
             # The sync protocol is fastest but can only read from the beginning.
@@ -229,6 +283,8 @@ class RemoteFS:
 
     async def storage(self, device_id: str, path: str) -> dict:
         """Return {"total", "free"} in bytes for the file system holding `path`."""
+        if fs := await self._mtp(device_id):
+            return await fs.storage(normalize_remote(path))
         res = await self._checked(device_id, f"df -k {_q(normalize_remote(path))}")
         lines = [line.split() for line in res.text.splitlines() if line.strip()]
         for fields in reversed(lines):
@@ -239,5 +295,7 @@ class RemoteFS:
         raise RemoteOpError(f"unexpected df output: {res.text.strip()!r}")
 
     async def read_bytes(self, device_id: str, path: str, limit: int) -> bytes:
+        if fs := await self._mtp(device_id):
+            return await fs.read_bytes(normalize_remote(path), limit)
         async with await self.sync(device_id) as sc:
             return await sc.read_bytes(normalize_remote(path), limit)

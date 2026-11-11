@@ -43,6 +43,7 @@ class Settings:
     prefer_usb: bool = True
     ask_before_transfer: bool = True
     external_drives: bool = True
+    mtp: bool = True
     known_endpoints: list[KnownEndpoint] = field(default_factory=list)
 
     def public(self) -> dict:
@@ -76,6 +77,7 @@ EDITABLE_FIELDS = {
     "prefer_usb",
     "ask_before_transfer",
     "external_drives",
+    "mtp",
 }
 
 

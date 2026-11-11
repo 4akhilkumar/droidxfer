@@ -103,6 +103,10 @@ async def _follow(ctx: AppContext, job: TransferJob, queue: asyncio.Queue) -> No
         f"[{color}]{d['status']}[/{color}]: {d['done_files']} copied, {d['skipped_files']} skipped, "
         f"{d['failed_files']} failed ({_size(d['bytes_done'])})"
     )
+    if d["error"] and not d["failures"]:
+        console.print(f"  [red]x[/red] {d['error']}")
+    if d.get("notice"):
+        console.print(f"  [yellow]![/yellow] {d['notice']}")
     for failure in d["failures"]:
         console.print(f"  [red]x[/red] {failure['rel']}: {failure['error']}")
     if d["status"] != "completed":
@@ -149,7 +153,9 @@ async def devices() -> None:
     try:
         table = Table("id", "name", "android", "state", "connection", "transports")
         for d in ctx.devices.snapshot()["devices"]:
-            transports = ", ".join(f"{t['kind']}:{t['serial']} ({t['state']})" for t in d["transports"])
+            transports = ", ".join(
+                f"{t['kind']}:{t['serial'].removeprefix('mtp:')} ({t['state'].replace('_', ' ')})" for t in d["transports"]
+            )
             table.add_row(d["id"], d["name"], d["android_version"], d["state"], d["connection"] or "-", transports)
         console.print(table)
     finally:
@@ -176,11 +182,12 @@ async def info(device: DeviceOpt = None) -> None:
             table.add_row(f"[dim]{row['label']}[/dim]", row["value"])
         console.print(table)
         console.print()
-    table = Table(show_header=False, title="Authenticity", title_justify="left", box=None, padding=(0, 2))
-    for check in report["checks"]:
-        table.add_row(_MARK[check["status"]], check["label"], check["value"], f"[dim]{check['detail']}[/dim]")
-    console.print(table)
-    color = {"pass": "green", "warn": "yellow", "fail": "red"}[report["verdict"]]
+    if report["checks"]:
+        table = Table(show_header=False, title="Authenticity", title_justify="left", box=None, padding=(0, 2))
+        for check in report["checks"]:
+            table.add_row(_MARK[check["status"]], check["label"], check["value"], f"[dim]{check['detail']}[/dim]")
+        console.print(table)
+    color = {"pass": "green", "warn": "yellow", "fail": "red"}.get(report["verdict"], "cyan")
     console.print(f"\n[bold {color}]{report['message']}[/bold {color}]")
     for note in report["notes"]:
         console.print(f"[dim]• {note}[/dim]")

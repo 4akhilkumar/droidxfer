@@ -98,6 +98,7 @@ class SettingsBody(BaseModel):
     prefer_usb: bool | None = None
     ask_before_transfer: bool | None = None
     external_drives: bool | None = None
+    mtp: bool | None = None
 
 
 # helpers --------------------------------------------------------------------------

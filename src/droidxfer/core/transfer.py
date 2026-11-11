@@ -16,6 +16,7 @@ from enum import Enum
 from pathlib import Path
 
 from ..adb import AdbCommandError, AdbConnectionError, AdbError, RemoteEntry, SyncConnection
+from ..mtp import MtpError
 from .config import CONFLICT_POLICIES, ConfigStore
 from .devices import DeviceError, DeviceManager
 from .events import EventBus
@@ -49,7 +50,7 @@ class JobStatus(str, Enum):
 
 FINISHED = frozenset({JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED})
 _TRANSPORT_ERRORS = (AdbConnectionError, DeviceError, asyncio.TimeoutError, ConnectionError)
-_FILE_ERRORS = (AdbError, RemoteOpError, OSError, PathError)
+_FILE_ERRORS = (AdbError, RemoteOpError, OSError, PathError, MtpError)
 
 
 @dataclass
@@ -77,6 +78,7 @@ class TransferJob:
     media_scan: bool = True
     status: JobStatus = JobStatus.QUEUED
     error: str | None = None
+    notice: str | None = None
     items: list[TransferItem] = field(default_factory=list)
     dirs: list[str] = field(default_factory=list)
     preplanned: bool = False
@@ -121,6 +123,7 @@ class TransferJob:
             "verify": self.verify,
             "status": self.status.value,
             "error": self.error,
+            "notice": self.notice,
             "total_files": len(self.items),
             "done_files": self.count("done"),
             "skipped_files": self.count("skipped"),
@@ -385,6 +388,9 @@ class TransferEngine:
     async def _run(self, job: TransferJob) -> None:
         try:
             await self._checkpoint(job)
+            if job.verify and self.remote.uses_mtp(job.device_id):
+                job.verify = False
+                job.notice = "MD5 check skipped: it needs USB debugging (the phone is in File transfer mode)."
             if not job.preplanned:
                 job.status = JobStatus.PLANNING
                 self._emit(job)

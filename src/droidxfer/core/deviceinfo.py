@@ -375,8 +375,46 @@ def build_report(sections: dict[str, str], *, serial: str, connection: str | Non
     }
 
 
+async def collect_mtp(remote: RemoteFS, device_id: str) -> dict:
+    """The little an MTP connection reveals: identity, battery level and storage."""
+    t = remote.devices.transport(device_id)
+    session = await remote.mtp.session(t)
+    info = session.info
+    storages = await session.refresh_storages()
+    battery = await session.battery_level()
+    name = f"{t.manufacturer} {t.model}".strip() or (info.model if info else t.serial)
+    device_rows = [
+        _row("Name", name),
+        _row("Manufacturer", t.manufacturer or (info.manufacturer if info else "")),
+        _row("Model", t.model or (info.model if info else "")),
+        _row("USB serial", t.serialno),
+        _row("Connected by", "USB, File transfer (MTP)"),
+    ]
+    for st in storages:
+        device_rows.append(_row(st.description or "Storage", f"{_gb(st.capacity)} ({_gb(st.free)} free)"))
+    return {
+        "name": name,
+        "verdict": "unknown",
+        "message": "Authenticity checks need USB debugging. Over File transfer (MTP) the phone only shares files.",
+        "battery_health_percent": None,
+        "checks": [],
+        "sections": [
+            {"id": "device", "title": "Device", "rows": device_rows},
+            {"id": "battery", "title": "Battery", "rows": [_row("Level", f"{battery}%" if battery is not None else None)]},
+        ],
+        "notes": [
+            "Turn on USB debugging (Settings > System > Developer options) to see the Android version, security "
+            "patch, battery health and cycle count, and to run the authenticity checks.",
+            "IMEI can't be read over USB. Dial *#06# on the phone and compare it with the box and the receipt.",
+        ],
+        "collected_at": time.time(),
+    }
+
+
 async def collect(remote: RemoteFS, device_id: str) -> dict:
     t = remote.devices.transport(device_id)
+    if t.kind == "mtp":
+        return await collect_mtp(remote, device_id)
     res = await remote.shell(device_id, INFO_COMMAND, timeout=30)
     sections = split_sections(res.text)
     if "props" not in sections:

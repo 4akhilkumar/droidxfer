@@ -11,6 +11,7 @@ from .config import ConfigStore, cache_dir
 from .devices import DeviceManager
 from .events import EventBus
 from .localfs import VOLUMES, LocalFS
+from .mtpdevices import MtpManager
 from .remotefs import RemoteFS
 from .thumbs import ThumbnailService
 from .transfer import TransferEngine
@@ -25,6 +26,7 @@ class AppContext:
         adb_port: int = DEFAULT_PORT,
         local_root: Path | None = None,
         config_path: Path | None = None,
+        mtp_scanner=None,
     ) -> None:
         self.config = ConfigStore(config_path)
         self.bus = EventBus()
@@ -35,7 +37,8 @@ class AppContext:
             extra_roots=[VOLUMES],
             extras_enabled=lambda: self.config.settings.external_drives,
         )
-        self.remote = RemoteFS(self.client, self.devices)
+        self.mtp = MtpManager(self.devices, self.config, scanner=mtp_scanner)
+        self.remote = RemoteFS(self.client, self.devices, self.mtp)
         self.engine = TransferEngine(self.devices, self.remote, self.local, self.bus, self.config)
         self.wireless = WirelessManager(self.client, self.devices, self.config, self.bus)
         self.thumbs = ThumbnailService(self.local, self.remote, self.devices)
@@ -46,10 +49,17 @@ class AppContext:
         if track:
             await self.devices.start()
         else:
-            await self.devices.ensure_adb()
-            await self.devices.refresh()
+            try:
+                await self.devices.ensure_adb()
+                await self.devices.refresh()
+            except Exception:
+                # Without adb, phones in File transfer (MTP) mode still work.
+                if not self.config.settings.mtp:
+                    raise
+        await self.mtp.start(poll=track)
 
     async def stop(self) -> None:
         await self.engine.shutdown()
         await self.wireless.stop()
+        await self.mtp.stop()
         await self.devices.stop()
