@@ -8,10 +8,11 @@ if a session runs out of context, share this file + the repo in a new session to
 - Wired USB preferred; Wi-Fi fallback (Android 11+ wireless debugging: pair code / QR, `adb connect`;
   also "enable Wi-Fi from USB" via `tcpip:5555`). Same phone on USB+Wi-Fi is grouped by `ro.serialno`, USB preferred.
 - Target phone: Pixel 7 Pro, Android 15+ (sync v2 STA2/LIS2 used; v1 fallback kept).
-- Python 3.11.16, managed with **uv**. Package name `droidxfer`, src layout.
+- Python 3.12.6 (requires >= 3.11), managed with **uv**. Package name `droidxfer`, src layout.
 - Own ADB client (asyncio sockets to adb server 127.0.0.1:5037) — no adbutils/ppadb.
 - UI: localhost web UI (primary) + Typer CLI. Frontend: native HTML/CSS/JS only (no frameworks).
-- Mac access: whole home directory (paths confined to `~`; Mac deletes go to `~/.Trash`).
+- Mac access: whole home directory plus `/Volumes/*` drives (setting `external_drives`, default on). Mac deletes use
+  `/usr/bin/trash` (macOS 15+, system Trash) with a fallback of moving into `~/.Trash`.
 - v1 features: multi-device, delete/rename/mkdir on device, thumbnails (Pillow), checksum verify (md5), QR pairing (segno SVG).
 
 ## Environment notes
@@ -22,12 +23,12 @@ if a session runs out of context, share this file + the repo in a new session to
 ## Architecture
 ```
 src/droidxfer/
-  adb/        protocol.py (host conn, framing, errors) · client.py (AdbClient: host services, transport)
-              sync.py (SyncConnection: LIST/LIS2/STAT/STA2/SEND/RECV) · shell.py (shell v2) · locate.py (find/start adb)
-  core/       config.py · models.py · events.py (EventBus) · devices.py (DeviceManager, track-devices)
+  adb/        protocol.py (host conn, framing, errors) · client.py (AdbClient: host services, transport, shell v2 + streaming)
+              sync.py (SyncConnection: LIST/LIS2/STAT/STA2/SEND/RECV) · locate.py (find/start adb)
+  core/       config.py · context.py (AppContext) · events.py (EventBus) · devices.py (DeviceManager, track-devices)
               wireless.py (pair/connect/QR/tcpip) · localfs.py (home-confined Mac FS) · remotefs.py (Android FS ops)
               transfer.py (TransferEngine) · thumbs.py (Pillow thumbnail cache) · paths.py (validation)
-  api/        app.py (FastAPI factory) · security.py (token cookie, Host/Origin/Sec-Fetch checks) · routes.py · ws.py
+  api/        app.py (FastAPI factory) · security.py (token cookie, Host/Origin/Sec-Fetch checks) · routes.py (REST + WS)
   web/        index.html · styles.css · js/*.js (ES modules)
   cli.py      Typer: serve, devices, ls, push, pull, pair, connect, disconnect, tcpip, mdns
 tests/        fake_adb.py (in-process fake adb server) + tests
@@ -70,10 +71,35 @@ tests/        fake_adb.py (in-process fake adb server) + tests
   Test artifacts were deleted afterwards (user approved).
 - Session 2: README now has "Setup on a new Mac" (brew/uv/adb, uv sync, phone prep, serve, `uv tool install .`,
   Wi-Fi, troubleshooting). Verified wheel includes web/ assets.
+- Session 3 (2026-11-10): code review + fixes on branch `improvements/bugfixes-and-features` (55 tests passing).
+  Bugs: pause during planning was overwritten to "running"; a job could be retried twice (dupes + lost upload staging);
+  no HTTP Range for phone files (Safari video, seeking); upload writes blocked the event loop; "prefer USB" didn't
+  republish devices; history eviction wasn't sent to the UI; malformed config.json crashed startup; QR sessions leaked;
+  `download_dir` setting was dead (removed). Features: `skip_identical` conflict policy (size + mtime), free space in
+  pane status bars + early "not enough space" failure (rename policy only), HEIC thumbnails (pillow-heif), LRU-capped
+  thumbnail cache (~200 MB), external drives (/Volumes), system Trash.
+  Range reads at offset > 0 use `dd ... iflag=skip_bytes,count_bytes` (toybox) over a streamed shell; offset 0 uses sync RECV.
+  Verified live on the Pixel 7 Pro over USB (toybox 0.8.13): `df -k` free space, dd Range reads byte-identical at 5 offsets
+  (<0.1 s each, dd seeks), browser video seek on a 58 MB mp4 (206s, no server errors, no leftover dd), skip_identical
+  push/pull incremental runs, HEIC thumbnail from the phone, Mac delete via /usr/bin/trash. Test files removed afterwards.
+
+- Session 3, part 2 (2026-11-10): double-click on phone videos showed an empty player. Cause: /file responses carry
+  CSP `sandbox` (opaque origin), so the browser's follow-up Range requests from the media document went without the
+  SameSite cookie (401) / were blocked. Fix: in-app viewer (web/js/preview.js) plays media inside the app page; raw
+  /file keeps the sandbox for anything opened in a tab. /preview endpoints render HEIC/TIFF as 2048 px JPEG.
+  Also found: static assets had no Cache-Control, so browsers reused a weeks-old styles.css next to new JS after an
+  update. Assets are now served under /static/<hash of web files>/ with `no-cache`, index.html rewritten at startup.
+  New: phone info (core/deviceinfo.py, GET /api/devices/{id}/info, `droidxfer info`, web/js/deviceinfo.js): one shell
+  round trip (getprop, dumpsys battery, /sys/class/power_supply/battery/*, meminfo, wm, df, uname, getenforce, su
+  scan, uptime, GMS version). Firmware consistency compares only the build part of every *.build.fingerprint (the
+  generic system image legitimately has product "generic_system"). Verified on the Pixel 7 Pro: all checks pass,
+  494 cycles, 4,436/5,002 mAh (89%), battery made 2024-03-09. 73 tests passing.
+
 ## Possible next steps / ideas
-- Live verification on device; tune throughput (IO_CHUNK, SYNC_DATA_MAX) if USB speed is low.
-- HEIC thumbnails (pillow-heif), video thumbnails, HTTP Range support for remote previews.
-- Zeroconf fallback if `adb mdns` discovery is unavailable.
+- Tune throughput (IO_CHUNK, SYNC_DATA_MAX); check Range/HEIC on a Samsung phone and in Safari.
+- sendrecv_v2 compression; pipelining many small files; stream Finder drops straight to the phone instead of staging.
+- Optional spec table per model (expected chip/RAM/storage) to strengthen the authenticity verdict.
+- Video thumbnails; Zeroconf fallback if `adb mdns` discovery is unavailable.
 
 ## Log
 - Session 1: env set up (uv + adb installed). Plan approved. Starting implementation.

@@ -9,12 +9,13 @@ import os
 import posixpath
 import secrets
 import shutil
+import stat as statmod
 import time
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 
-from ..adb import AdbCommandError, AdbConnectionError, AdbError, SyncConnection
+from ..adb import AdbCommandError, AdbConnectionError, AdbError, RemoteEntry, SyncConnection
 from .config import CONFLICT_POLICIES, ConfigStore
 from .devices import DeviceError, DeviceManager
 from .events import EventBus
@@ -81,6 +82,7 @@ class TransferJob:
     preplanned: bool = False
     cleanup: list[str] = field(default_factory=list)
     retry_of: str | None = None
+    retried_by: str | None = None
     total_bytes: int = 0
     bytes_done: int = 0
     current: str | None = None
@@ -132,8 +134,20 @@ class TransferJob:
             "created_at": self.created_at,
             "started_at": self.started_at,
             "finished_at": self.finished_at,
-            "can_retry": self.status in (JobStatus.FAILED, JobStatus.CANCELLED),
+            "can_retry": self.status in (JobStatus.FAILED, JobStatus.CANCELLED) and not self.retried_by,
         }
+
+
+class InsufficientSpace(Exception):
+    pass
+
+
+def _human(n: float) -> str:
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024:
+            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n:.1f} TB"
 
 
 def md5_file(path: str | Path) -> str:
@@ -142,6 +156,14 @@ def md5_file(path: str | Path) -> str:
         for chunk in iter(lambda: fh.read(1 << 20), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _same_file(path: Path, item: TransferItem) -> bool:
+    try:
+        st = path.stat()
+    except OSError:
+        return False
+    return statmod.S_ISREG(st.st_mode) and st.st_size == item.size and int(st.st_mtime) == item.mtime
 
 
 class TransferEngine:
@@ -206,7 +228,12 @@ class TransferEngine:
     def resume(self, job_id: str) -> TransferJob:
         job = self._get(job_id)
         if job.status == JobStatus.PAUSED:
-            job.status = JobStatus.RUNNING if job.started_at else JobStatus.QUEUED
+            if job.started_at:
+                job.status = JobStatus.RUNNING
+            elif job.task and not job.task.done():
+                job.status = JobStatus.PLANNING
+            else:
+                job.status = JobStatus.QUEUED
             job.resume_event.set()
             self._emit(job)
         return job
@@ -226,6 +253,8 @@ class TransferEngine:
         old = self._get(job_id)
         if old.status not in (JobStatus.FAILED, JobStatus.CANCELLED):
             raise ValueError("only failed or cancelled transfers can be retried")
+        if old.retried_by:
+            raise ValueError("this transfer has already been retried")
         job = TransferJob(
             id=secrets.token_hex(6),
             device_id=old.device_id,
@@ -239,6 +268,7 @@ class TransferEngine:
             retry_of=old.id,
         )
         old.cleanup = []
+        old.retried_by = job.id
         pending = [i for i in old.items if i.status in ("failed", "pending")]
         if old.items and pending:
             job.preplanned = True
@@ -247,6 +277,7 @@ class TransferEngine:
                 TransferItem(i.src, i.rel, i.dst, i.size, i.mtime, i.mode) for i in pending
             ]
         self._enqueue(job)
+        self._emit(old)
         return job
 
     def clear_finished(self) -> list[str]:
@@ -286,11 +317,15 @@ class TransferEngine:
 
     def _enqueue(self, job: TransferJob) -> None:
         self.jobs[job.id] = job
+        evicted = []
         while len(self.jobs) > MAX_HISTORY:
             oldest = next((j for j in self.jobs.values() if j.status in FINISHED), None)
             if oldest is None:
                 break
             self._cleanup(self.jobs.pop(oldest.id), force=True)
+            evicted.append(oldest.id)
+        if evicted:
+            self.bus.publish("jobs_removed", evicted)
         queue = self._queues.get(job.device_id)
         if queue is None:
             queue = self._queues[job.device_id] = asyncio.Queue()
@@ -358,7 +393,9 @@ class TransferEngine:
                 else:
                     await self._plan_pull(job)
             job.total_bytes = sum(i.size for i in job.items if i.status == "pending")
-            job.status = JobStatus.RUNNING
+            await self._check_space(job)
+            # A pause requested while planning must survive: the first checkpoint will wait.
+            job.status = JobStatus.RUNNING if job.resume_event.is_set() else JobStatus.PAUSED
             job.started_at = time.time()
             job._emit_at, job._emit_bytes = time.monotonic(), 0
             self._emit(job)
@@ -377,9 +414,33 @@ class TransferEngine:
                 self._finish(job, JobStatus.COMPLETED)
         except asyncio.CancelledError:
             self._finish(job, JobStatus.CANCELLED)
+        except InsufficientSpace as exc:
+            self._finish(job, JobStatus.FAILED, str(exc))
         except Exception as exc:
             log.exception("transfer %s failed", job.id)
             self._finish(job, JobStatus.FAILED, str(exc) or exc.__class__.__name__)
+
+    async def _check_space(self, job: TransferJob) -> None:
+        """Fail early when the destination clearly cannot hold the copy.
+
+        Only enforced for the 'rename' policy: with skip/overwrite/skip_identical many planned
+        bytes may never be written (or replace existing ones), so the estimate is not reliable.
+        """
+        if job.conflict != "rename" or not job.total_bytes:
+            return
+        try:
+            if job.direction == Direction.PUSH:
+                free = (await self.remote.storage(job.device_id, job.dest_dir))["free"]
+            else:
+                free = (await asyncio.to_thread(self.local.storage, job.dest_dir))["free"]
+        except Exception as exc:  # the check is best-effort
+            log.info("free-space check failed: %s", exc)
+            return
+        if job.total_bytes > free:
+            where = "the phone" if job.direction == Direction.PUSH else "the Mac"
+            raise InsufficientSpace(
+                f"not enough space on {where}: need {_human(job.total_bytes)}, {_human(free)} free"
+            )
 
     # planning ------------------------------------------------------------------
     async def _plan_push(self, job: TransferJob) -> None:
@@ -461,7 +522,7 @@ class TransferEngine:
     # execution -----------------------------------------------------------------
     async def _execute(self, job: TransferJob) -> None:
         sc: SyncConnection | None = None
-        name_cache: dict[str, set[str]] = {}
+        name_cache: dict[str, dict[str, RemoteEntry | None]] = {}
         try:
             for item in job.items:
                 if item.status != "pending":
@@ -513,7 +574,8 @@ class TransferEngine:
         job.total_bytes -= item.size
 
     async def _transfer_one(
-        self, job: TransferJob, item: TransferItem, sc: SyncConnection, name_cache: dict[str, set[str]]
+        self, job: TransferJob, item: TransferItem, sc: SyncConnection,
+        name_cache: dict[str, dict[str, RemoteEntry | None]],
     ) -> None:
         if job.direction == Direction.PUSH:
             await self._push_one(job, item, sc, name_cache)
@@ -523,20 +585,25 @@ class TransferEngine:
             item.status = "done"
 
     async def _push_one(
-        self, job: TransferJob, item: TransferItem, sc: SyncConnection, name_cache: dict[str, set[str]]
+        self, job: TransferJob, item: TransferItem, sc: SyncConnection,
+        name_cache: dict[str, dict[str, RemoteEntry | None]],
     ) -> None:
         parent, name = posixpath.split(item.dst)
         if parent not in name_cache:
-            name_cache[parent] = {e.name for e in await sc.list(parent)}
+            name_cache[parent] = {e.name: e for e in await sc.list(parent)}
         names = name_cache[parent]
         if name in names:
-            if job.conflict == "skip":
+            existing = names[name]
+            if job.conflict == "skip" or (
+                job.conflict == "skip_identical" and existing is not None and existing.is_file
+                and existing.size == item.size and existing.mtime == item.mtime
+            ):
                 self._skip_item(job, item)
                 return
             if job.conflict == "rename":
                 name = unique_name(name, names.__contains__)
                 item.dst = posixpath.join(parent, name)
-        names.add(name)
+        names[name] = None
         try:
             with open(item.src, "rb") as fh:
                 await sc.push(
@@ -556,13 +623,13 @@ class TransferEngine:
         except BaseException as exc:
             if not isinstance(exc, _TRANSPORT_ERRORS):
                 await asyncio.shield(self.remote.remove_quietly(job.device_id, item.dst))
-            names.discard(name)
+            names.pop(name, None)
             raise
 
     async def _pull_one(self, job: TransferJob, item: TransferItem, sc: SyncConnection) -> None:
         dst = self.local.resolve(item.dst, follow=False)
         if os.path.lexists(dst):
-            if job.conflict == "skip":
+            if job.conflict == "skip" or (job.conflict == "skip_identical" and _same_file(dst, item)):
                 self._skip_item(job, item)
                 return
             if job.conflict == "rename":

@@ -10,7 +10,7 @@ from ..adb.protocol import DEFAULT_HOST, DEFAULT_PORT
 from .config import ConfigStore, cache_dir
 from .devices import DeviceManager
 from .events import EventBus
-from .localfs import LocalFS
+from .localfs import VOLUMES, LocalFS
 from .remotefs import RemoteFS
 from .thumbs import ThumbnailService
 from .transfer import TransferEngine
@@ -30,7 +30,11 @@ class AppContext:
         self.bus = EventBus()
         self.client = AdbClient(adb_host, adb_port)
         self.devices = DeviceManager(self.client, self.bus, self.config)
-        self.local = LocalFS(local_root)
+        self.local = LocalFS(
+            local_root,
+            extra_roots=[VOLUMES],
+            extras_enabled=lambda: self.config.settings.external_drives,
+        )
         self.remote = RemoteFS(self.client, self.devices)
         self.engine = TransferEngine(self.devices, self.remote, self.local, self.bus, self.config)
         self.wireless = WirelessManager(self.client, self.devices, self.config, self.bus)

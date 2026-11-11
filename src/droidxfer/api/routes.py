@@ -19,12 +19,15 @@ from pydantic import BaseModel, Field
 
 from .. import __version__
 from ..core.context import AppContext
+from ..core import deviceinfo
 from ..core.paths import validate_name
+from ..core.thumbs import PREVIEW_SIZE
 from ..core.transfer import Direction
 
 router = APIRouter()
-Conflict = Literal["rename", "overwrite", "skip"]
+Conflict = Literal["rename", "overwrite", "skip", "skip_identical"]
 _UPLOAD_ID = re.compile(r"^[0-9a-f]{16}$")
+_UPLOAD_FLUSH = 1024 * 1024
 _PREVIEW_CSP = "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'; sandbox"
 
 
@@ -88,13 +91,13 @@ class TcpipBody(BaseModel):
 
 class SettingsBody(BaseModel):
     adb_path: str | None = None
-    download_dir: str | None = None
     default_conflict: Conflict | None = None
     verify_checksum: bool | None = None
     media_scan: bool | None = None
     show_hidden: bool | None = None
     prefer_usb: bool | None = None
     ask_before_transfer: bool | None = None
+    external_drives: bool | None = None
 
 
 # helpers --------------------------------------------------------------------------
@@ -111,6 +114,22 @@ def _file_headers(name: str) -> tuple[str, dict[str, str]]:
         "Content-Security-Policy": _PREVIEW_CSP,
         "Cache-Control": "no-store",
     }
+
+
+_RANGE = re.compile(r"^bytes=(\d*)-(\d*)$")
+
+
+def parse_range(header: str, size: int) -> tuple[int, int] | None:
+    """Parse a single-range `Range` header into an inclusive (start, end), or None if unsatisfiable."""
+    m = _RANGE.match(header.strip())
+    if not m or size == 0 or (not m.group(1) and not m.group(2)):
+        return None
+    if not m.group(1):  # suffix range: the last N bytes
+        start, end = max(size - int(m.group(2)), 0), size - 1
+    else:
+        start = int(m.group(1))
+        end = min(int(m.group(2)), size - 1) if m.group(2) else size - 1
+    return (start, end) if start <= end else None
 
 
 async def _thumb(load) -> Response:
@@ -140,7 +159,9 @@ async def get_settings(ctx: AppContext = Ctx) -> dict[str, Any]:
 
 @router.put("/settings")
 async def put_settings(body: SettingsBody, ctx: AppContext = Ctx) -> dict[str, Any]:
-    return ctx.config.update(body.model_dump(exclude_unset=True)).public()
+    settings = ctx.config.update(body.model_dump(exclude_unset=True)).public()
+    ctx.devices.republish()  # e.g. "prefer USB" changes which transport is shown as active
+    return settings
 
 
 # Android device -------------------------------------------------------------------
@@ -159,14 +180,42 @@ async def device_thumb(device_id: str, path: str, ctx: AppContext = Ctx) -> Resp
     return await _thumb(ctx.thumbs.for_remote(device_id, path))
 
 
+@router.get("/devices/{device_id}/preview")
+async def device_preview(device_id: str, path: str, ctx: AppContext = Ctx) -> Response:
+    return await _thumb(ctx.thumbs.for_remote(device_id, path, PREVIEW_SIZE))
+
+
 @router.get("/devices/{device_id}/file")
-async def device_file(device_id: str, path: str, ctx: AppContext = Ctx) -> StreamingResponse:
+async def device_file(device_id: str, path: str, request: Request, ctx: AppContext = Ctx) -> Response:
     st = await ctx.remote.stat(device_id, path)
     if st is None or not st.is_file:
         raise HTTPException(404, "file not found")
     media_type, headers = _file_headers(PurePosixPath(path).name)
-    headers["Content-Length"] = str(st.size)
-    return StreamingResponse(ctx.remote.iter_file(device_id, path), media_type=media_type, headers=headers)
+    headers["Accept-Ranges"] = "bytes"
+    range_header = request.headers.get("range")
+    if range_header is None:
+        headers["Content-Length"] = str(st.size)
+        return StreamingResponse(ctx.remote.iter_file(device_id, path), media_type=media_type, headers=headers)
+    span = parse_range(range_header, st.size)
+    if span is None:
+        return Response(status_code=416, headers={"Content-Range": f"bytes */{st.size}"})
+    start, end = span
+    headers["Content-Length"] = str(end - start + 1)
+    headers["Content-Range"] = f"bytes {start}-{end}/{st.size}"
+    return StreamingResponse(
+        ctx.remote.iter_range(device_id, path, start, end - start + 1),
+        status_code=206, media_type=media_type, headers=headers,
+    )
+
+
+@router.get("/devices/{device_id}/info")
+async def device_info(device_id: str, ctx: AppContext = Ctx) -> dict:
+    return await deviceinfo.collect(ctx.remote, device_id)
+
+
+@router.get("/devices/{device_id}/storage")
+async def device_storage(device_id: str, path: str = "/sdcard", ctx: AppContext = Ctx) -> dict:
+    return await ctx.remote.storage(device_id, path)
 
 
 @router.post("/devices/{device_id}/mkdir")
@@ -195,9 +244,24 @@ async def local_ls(path: str = "~", hidden: bool = False, ctx: AppContext = Ctx)
     return await asyncio.to_thread(ctx.local.list, path, show_hidden=hidden)
 
 
+@router.get("/local/storage")
+async def local_storage(path: str = "~", ctx: AppContext = Ctx) -> dict:
+    return await asyncio.to_thread(ctx.local.storage, path)
+
+
+@router.get("/local/volumes")
+async def local_volumes(ctx: AppContext = Ctx) -> list[dict]:
+    return await asyncio.to_thread(ctx.local.volumes)
+
+
 @router.get("/local/thumb")
 async def local_thumb(path: str, ctx: AppContext = Ctx) -> Response:
     return await _thumb(ctx.thumbs.for_local(path))
+
+
+@router.get("/local/preview")
+async def local_preview(path: str, ctx: AppContext = Ctx) -> Response:
+    return await _thumb(ctx.thumbs.for_local(path, PREVIEW_SIZE))
 
 
 @router.get("/local/file")
@@ -276,14 +340,24 @@ async def upload_file(
     if not parts or rel.startswith("/"):
         raise HTTPException(400, "invalid relative path")
     target = base.joinpath(*(validate_name(p) for p in parts))
-    target.parent.mkdir(parents=True, exist_ok=True)
+    # File I/O runs in a worker thread so a large drop never stalls the event loop.
+    await asyncio.to_thread(target.parent.mkdir, parents=True, exist_ok=True)
     size = 0
-    with open(target, "wb") as fh:
+    pending = bytearray()
+    fh = await asyncio.to_thread(open, target, "wb")
+    try:
         async for chunk in request.stream():
-            fh.write(chunk)
+            pending += chunk
             size += len(chunk)
+            if len(pending) >= _UPLOAD_FLUSH:
+                await asyncio.to_thread(fh.write, bytes(pending))
+                pending.clear()
+        if pending:
+            await asyncio.to_thread(fh.write, bytes(pending))
+    finally:
+        await asyncio.to_thread(fh.close)
     if mtime:
-        os.utime(target, (mtime / 1000, mtime / 1000))
+        await asyncio.to_thread(os.utime, target, (mtime / 1000, mtime / 1000))
     return {"size": size}
 
 

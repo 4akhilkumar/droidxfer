@@ -1,16 +1,23 @@
-"""Mac file-system access confined to a root folder (the user's home by default)."""
+"""Mac file-system access confined to the user's home folder (plus, optionally, external drives)."""
 
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 import stat as statmod
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable, Iterable
 
 from .paths import PathError, unique_name, validate_name
 
+log = logging.getLogger(__name__)
+
 SKIP_NAMES = frozenset({".DS_Store"})
+VOLUMES = Path("/Volumes")
+TRASH_TOOL = "/usr/bin/trash"  # ships with macOS 15+; uses the system Trash (per-volume, Finder-aware)
 
 
 @dataclass(slots=True)
@@ -23,12 +30,29 @@ class LocalFile:
 
 
 class LocalFS:
-    def __init__(self, root: Path | None = None) -> None:
+    def __init__(
+        self,
+        root: Path | None = None,
+        *,
+        extra_roots: Iterable[Path] = (),
+        extras_enabled: Callable[[], bool] = lambda: True,
+    ) -> None:
         self.root = (root or Path.home()).resolve()
         self.trash_dir = self.root / ".Trash"
+        self.extra_roots = tuple(Path(p) for p in extra_roots)
+        self._extras_enabled = extras_enabled
+
+    def roots(self) -> tuple[Path, ...]:
+        return (self.root, *self.extra_roots) if self._extras_enabled() else (self.root,)
+
+    def _root_of(self, p: Path) -> Path | None:
+        for root in self.roots():
+            if p == root or root in p.parents:
+                return root
+        return None
 
     def _inside(self, p: Path) -> bool:
-        return p == self.root or self.root in p.parents
+        return self._root_of(p) is not None
 
     def resolve(self, path: str | os.PathLike[str], *, follow: bool = True) -> Path:
         raw = os.fspath(path)
@@ -45,7 +69,8 @@ class LocalFS:
         else:
             resolved = p.parent.resolve() / p.name
         if not self._inside(resolved):
-            raise PermissionError(f"{raw} is outside {self.root}")
+            where = " or ".join(str(r) for r in self.roots())
+            raise PermissionError(f"{raw} is outside {where}")
         return resolved
 
     def info(self, p: Path) -> dict:
@@ -84,8 +109,33 @@ class LocalFS:
                     continue
                 entries.append(info)
         entries.sort(key=lambda e: (not e["is_dir"], e["name"].casefold()))
-        parent = str(directory.parent) if directory != self.root else None
-        return {"path": str(directory), "parent": parent, "root": str(self.root), "entries": entries}
+        root = self._root_of(directory) or self.root
+        parent = str(directory.parent) if directory != root else None
+        return {"path": str(directory), "parent": parent, "root": str(root), "entries": entries}
+
+    def storage(self, path: str) -> dict:
+        usage = shutil.disk_usage(self.resolve(path))
+        return {"total": usage.total, "free": usage.free}
+
+    def volumes(self) -> list[dict]:
+        """External drives under /Volumes (the boot volume link to / is left out)."""
+        result: list[dict] = []
+        for extra in self.extra_roots if self._extras_enabled() else ():
+            try:
+                children = sorted(extra.iterdir())
+            except OSError:
+                continue
+            for child in children:
+                try:
+                    if child.is_dir() and self._inside(child.resolve()) and not child.name.startswith("."):
+                        result.append({"name": child.name, "path": str(child.resolve())})
+                except OSError:
+                    continue
+        return result
+
+    def _protected(self, p: Path) -> bool:
+        """Roots, the Trash and whole drives (/Volumes/X) can't be renamed or deleted."""
+        return p in self.roots() or p == self.trash_dir or any(p.parent == r for r in self.extra_roots)
 
     def exists(self, path: Path) -> bool:
         return os.path.lexists(path)
@@ -97,8 +147,8 @@ class LocalFS:
 
     def rename(self, path: str, new_name: str) -> str:
         src = self.resolve(path, follow=False)
-        if src == self.root:
-            raise PathError("cannot rename the root folder")
+        if self._protected(src):
+            raise PathError(f"cannot rename {src}")
         dst = src.parent / validate_name(new_name)
         if self.exists(dst):
             raise FileExistsError(str(dst))
@@ -106,17 +156,38 @@ class LocalFS:
         return str(dst)
 
     def trash(self, paths: list[str]) -> list[str]:
-        """Move items to ~/.Trash instead of deleting them permanently."""
-        self.trash_dir.mkdir(exist_ok=True)
-        moved = []
-        for raw in paths:
-            src = self.resolve(raw, follow=False)
-            if src in (self.root, self.trash_dir):
+        """Move items to the Trash instead of deleting them permanently."""
+        sources = [self.resolve(raw, follow=False) for raw in paths]
+        for src in sources:
+            if self._protected(src):
                 raise PathError(f"refusing to delete {src}")
-            name = unique_name(src.name, lambda n: self.exists(self.trash_dir / n), is_dir=src.is_dir())
-            shutil.move(str(src), str(self.trash_dir / name))
+        moved = []
+        for src in sources:
+            if not self.exists(src):
+                raise FileNotFoundError(str(src))
+            if not self._system_trash(src):
+                self._manual_trash(src)
             moved.append(str(src))
         return moved
+
+    def _system_trash(self, src: Path) -> bool:
+        """Use macOS's own Trash (handles external drives); False if unavailable."""
+        if not os.access(TRASH_TOOL, os.X_OK):
+            return False
+        try:
+            res = subprocess.run([TRASH_TOOL, str(src)], capture_output=True, text=True, timeout=60)
+        except (OSError, subprocess.SubprocessError) as exc:
+            log.info("system trash failed for %s: %s", src, exc)
+            return False
+        if res.returncode == 0 and not self.exists(src):
+            return True
+        log.info("system trash failed for %s: %s", src, (res.stderr or res.stdout).strip())
+        return False
+
+    def _manual_trash(self, src: Path) -> None:
+        self.trash_dir.mkdir(exist_ok=True)
+        name = unique_name(src.name, lambda n: self.exists(self.trash_dir / n), is_dir=src.is_dir())
+        shutil.move(str(src), str(self.trash_dir / name))
 
     def walk(self, top: Path) -> tuple[list[str], list[LocalFile]]:
         """Return (relative dirs, files) under `top`; skips symlinked dirs and links leaving the root."""

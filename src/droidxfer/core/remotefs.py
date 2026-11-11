@@ -203,6 +203,41 @@ class RemoteFS:
             sc.broken = True
             await sc.close()
 
+    async def iter_range(self, device_id: str, path: str, start: int, length: int) -> AsyncIterator[bytes]:
+        """Yield `length` bytes of a remote file starting at `start` (for HTTP Range requests)."""
+        path = normalize_remote(path)
+        remaining = length
+        if start == 0:
+            # The sync protocol is fastest but can only read from the beginning.
+            source = self.iter_file(device_id, path)
+        else:
+            t = self.devices.transport(device_id)
+            command = (
+                f"dd if={_q(path)} bs=65536 iflag=skip_bytes,count_bytes "
+                f"skip={int(start)} count={int(length)} 2>/dev/null"
+            )
+            source = self.client.shell_stream(t.serial, command, v2="shell_v2" in t.features)
+        try:
+            async for chunk in source:
+                if len(chunk) >= remaining:
+                    yield chunk[:remaining]
+                    return
+                remaining -= len(chunk)
+                yield chunk
+        finally:
+            await source.aclose()
+
+    async def storage(self, device_id: str, path: str) -> dict:
+        """Return {"total", "free"} in bytes for the file system holding `path`."""
+        res = await self._checked(device_id, f"df -k {_q(normalize_remote(path))}")
+        lines = [line.split() for line in res.text.splitlines() if line.strip()]
+        for fields in reversed(lines):
+            nums = [f for f in fields[1:4] if f.isdigit()]
+            if len(nums) == 3:
+                total, _used, free = (int(n) * 1024 for n in nums)
+                return {"total": total, "free": free}
+        raise RemoteOpError(f"unexpected df output: {res.text.strip()!r}")
+
     async def read_bytes(self, device_id: str, path: str, limit: int) -> bytes:
         async with await self.sync(device_id) as sc:
             return await sc.read_bytes(normalize_remote(path), limit)

@@ -9,7 +9,7 @@ import time
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
-CONFLICT_POLICIES = ("rename", "overwrite", "skip")
+CONFLICT_POLICIES = ("rename", "overwrite", "skip", "skip_identical")
 
 
 def app_dir() -> Path:
@@ -36,13 +36,13 @@ class KnownEndpoint:
 @dataclass
 class Settings:
     adb_path: str | None = None
-    download_dir: str = "~/Downloads"
     default_conflict: str = "rename"
     verify_checksum: bool = False
     media_scan: bool = True
     show_hidden: bool = False
     prefer_usb: bool = True
     ask_before_transfer: bool = True
+    external_drives: bool = True
     known_endpoints: list[KnownEndpoint] = field(default_factory=list)
 
     def public(self) -> dict:
@@ -51,15 +51,31 @@ class Settings:
         return data
 
 
+def _endpoint(raw: object) -> KnownEndpoint | None:
+    if not isinstance(raw, dict):
+        return None
+    host, port = raw.get("host"), raw.get("port")
+    if not isinstance(host, str) or not host or type(port) is not int:
+        return None
+    name, serialno, last_seen = raw.get("name", ""), raw.get("serialno", ""), raw.get("last_seen", 0.0)
+    return KnownEndpoint(
+        host,
+        port,
+        name if isinstance(name, str) else "",
+        serialno if isinstance(serialno, str) else "",
+        float(last_seen) if isinstance(last_seen, (int, float)) else 0.0,
+    )
+
+
 EDITABLE_FIELDS = {
     "adb_path",
-    "download_dir",
     "default_conflict",
     "verify_checksum",
     "media_scan",
     "show_hidden",
     "prefer_usb",
     "ask_before_transfer",
+    "external_drives",
 }
 
 
@@ -73,12 +89,23 @@ class ConfigStore:
             raw = json.loads(self.path.read_text())
         except (OSError, ValueError):
             return Settings()
-        known = [KnownEndpoint(**k) for k in raw.pop("known_endpoints", []) if isinstance(k, dict)]
-        allowed = {f.name for f in fields(Settings)}
-        settings = Settings(**{k: v for k, v in raw.items() if k in allowed})
-        settings.known_endpoints = known
+        if not isinstance(raw, dict):
+            return Settings()
+        settings = Settings()
+        # Take each value only if it has the same type as the default, so a hand-edited or
+        # older config file can never stop the app from starting.
+        for f in fields(Settings):
+            if f.name == "known_endpoints" or f.name not in raw:
+                continue
+            value, default = raw[f.name], getattr(settings, f.name)
+            if f.name == "adb_path":
+                if value is None or isinstance(value, str):
+                    settings.adb_path = value or None
+            elif type(value) is type(default):
+                setattr(settings, f.name, value)
         if settings.default_conflict not in CONFLICT_POLICIES:
             settings.default_conflict = "rename"
+        settings.known_endpoints = [ep for k in raw.get("known_endpoints") or [] if (ep := _endpoint(k))]
         return settings
 
     def save(self) -> None:

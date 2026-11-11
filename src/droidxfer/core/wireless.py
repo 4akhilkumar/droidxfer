@@ -24,6 +24,7 @@ _CODE = re.compile(r"^[A-Za-z0-9]{4,32}$")
 _GUID = re.compile(r"guid=([^\]\s]+)")
 _WLAN_IP = re.compile(r"inet (\d{1,3}(?:\.\d{1,3}){3})/")
 QR_TIMEOUT = 180
+QR_FORGET_AFTER = 60
 
 
 class WirelessError(Exception):
@@ -153,6 +154,10 @@ class WirelessManager:
         for name in list(self._qr):
             self.cancel_qr(name)
 
+    def _forget_qr(self, s: QrSession) -> None:
+        if self._qr.get(s.name) is s:
+            del self._qr[s.name]
+
     def _update(self, s: QrSession, state: str, message: str) -> None:
         s.state, s.message = state, message
         self.bus.publish("qr_status", s.to_dict())
@@ -196,3 +201,6 @@ class WirelessManager:
             raise
         except Exception as exc:
             self._update(s, "failed", str(exc) or exc.__class__.__name__)
+        finally:
+            # Keep the final state around briefly for status polls, then forget the session.
+            loop.call_later(QR_FORGET_AFTER, self._forget_qr, s)

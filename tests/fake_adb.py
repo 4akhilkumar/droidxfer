@@ -37,6 +37,48 @@ class FakeAdb:
         self.shell_log: list[str] = []
         self.mdns_text = ""
         self.fail_recv_after: int | None = None  # drop connection after N bytes of RECV data
+        fp = "google/cheetah/cheetah:15/AP4A.250105.002/12701944:user/release-keys"
+        self.props: dict[str, str] = {
+            "ro.product.brand": "google",
+            "ro.product.manufacturer": "Google",
+            "ro.product.model": "Pixel 7 Pro",
+            "ro.product.device": "cheetah",
+            "ro.product.name": "cheetah",
+            "ro.product.first_api_level": "33",
+            "ro.product.cpu.abi": "arm64-v8a",
+            "ro.soc.manufacturer": "Google",
+            "ro.soc.model": "GS201",
+            "ro.hardware": "cheetah",
+            "ro.boot.hardware.sku": "GP4BC",
+            "ro.build.version.release": "15",
+            "ro.build.version.sdk": "35",
+            "ro.build.version.security_patch": "2025-01-05",
+            "ro.build.display.id": "AP4A.250105.002",
+            "ro.build.type": "user",
+            "ro.build.tags": "release-keys",
+            "ro.build.fingerprint": fp,
+            "ro.vendor.build.fingerprint": fp,
+            "ro.bootimage.build.fingerprint": fp,
+            "ro.system.build.fingerprint": "google/generic_system_google/generic:15/AP4A.250105.002/12701944:user/release-keys",
+            "ro.bootloader": "cloudripper-15.0-12345",
+            "gsm.version.baseband": "g5300q-1,g5300q-1",
+            "ro.boot.verifiedbootstate": "green",
+            "ro.boot.flash.locked": "1",
+            "ro.boot.vbmeta.device_state": "locked",
+            "ro.secure": "1",
+            "ro.debuggable": "0",
+            "ro.crypto.state": "encrypted",
+        }
+        self.battery_sysfs: dict[str, str] = {
+            "cycle_count": "494",
+            "charge_full": "4436000",
+            "charge_full_design": "5002000",
+            "manufacturing_date": "1709942400",
+            "first_usage_date": "0",
+            "serial_number": "BATTSERIAL1",
+        }
+        self.su_paths: list[str] = []
+        self.selinux = "Enforcing"
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
         self._server: asyncio.base_events.Server | None = None
@@ -130,7 +172,27 @@ class FakeAdb:
         w.write(_SHELL_HDR.pack(3, 1) + bytes([code]))
         await w.drain()
 
+    def _info_output(self) -> bytes:
+        props = "\n".join(f"[{k}]: [{v}]" for k, v in sorted(self.props.items()))
+        battery = (
+            "Current Battery Service state:\n  AC powered: false\n  USB powered: true\n  Wireless powered: false\n"
+            "  status: 2\n  health: 2\n  present: true\n  level: 57\n  scale: 100\n  voltage: 4171\n"
+            "  temperature: 363\n  technology: Li-ion\n"
+        )
+        sysbat = "\n".join(f"{k}={v}" for k, v in self.battery_sysfs.items())
+        parts = [
+            ("props", props), ("battery", battery), ("sysbat", sysbat),
+            ("meminfo", "MemTotal:       11743512 kB\nMemAvailable:    5000000 kB"), ("cpus", "8"),
+            ("wm", "Physical size: 1440x3120\nPhysical density: 560"),
+            ("df", "Filesystem 1K-blocks Used Available Use% Mounted on\n/dev/block/dm-65 115249236 68075864 47042300 60% /data"),
+            ("kernel", "6.1.99-android14"), ("selinux", self.selinux), ("su", "\n".join(self.su_paths)),
+            ("uptime", "43948.59 153377.77"), ("gms", "    versionName=26.43.30 (260400-1006944126)"),
+        ]
+        return ("\n".join(f"@@{name}\n{body}" for name, body in parts) + "\n@@end\n").encode()
+
     def _run_shell(self, command: str) -> tuple[bytes, int]:
+        if command.startswith("echo @@props"):
+            return self._info_output(), 0
         if command.startswith("getprop"):
             return f"{self.serial}\nGoogle\nPixel 7 Pro\n15\n35\n".encode(), 0
         lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
@@ -166,6 +228,15 @@ class FakeAdb:
             elif name == "md5sum":
                 digest = hashlib.md5(self.path(args[0]).read_bytes()).hexdigest()
                 out += f"{digest}  {args[0]}\n".encode()
+            elif name == "dd":
+                opts = dict(t.split("=", 1) for t in toks[1:] if "=" in t)
+                with open(self.path(opts["if"]), "rb") as fh:
+                    fh.seek(int(opts.get("skip", 0)))
+                    out += fh.read(int(opts["count"])) if "count" in opts else fh.read()
+            elif name == "df":
+                usage = shutil.disk_usage(self.path(args[0]))
+                out += b"Filesystem 1K-blocks Used Available Use% Mounted on\n"
+                out += f"/dev/fuse {usage.total // 1024} {usage.used // 1024} {usage.free // 1024} 1% /storage/emulated\n".encode()
             elif name == "ip":
                 out += b"3: wlan0: <UP>\n    inet 192.168.1.50/24 brd 192.168.1.255 scope global wlan0\n"
         return out, 0

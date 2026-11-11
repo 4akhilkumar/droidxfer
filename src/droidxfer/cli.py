@@ -30,7 +30,7 @@ console = Console()
 err = Console(stderr=True)
 
 DeviceOpt = Annotated[str | None, typer.Option("--device", "-d", help="Device id or adb serial.")]
-ConflictOpt = Annotated[str | None, typer.Option("--conflict", "-c", help="rename | overwrite | skip")]
+ConflictOpt = Annotated[str | None, typer.Option("--conflict", "-c", help="rename | overwrite | skip | skip_identical")]
 VerifyOpt = Annotated[bool | None, typer.Option("--verify/--no-verify", help="Compare MD5 after copying.")]
 _HANDLED = (AdbError, DeviceError, PathError, RemoteOpError, WirelessError, OSError, ValueError, KeyError)
 
@@ -154,6 +154,36 @@ async def devices() -> None:
         console.print(table)
     finally:
         await ctx.stop()
+
+
+_MARK = {"pass": "[green]✓[/green]", "warn": "[yellow]![/yellow]", "fail": "[red]✗[/red]", "unknown": "[dim]?[/dim]"}
+
+
+@app.command()
+@run_async
+async def info(device: DeviceOpt = None) -> None:
+    """Show detailed phone information and firmware authenticity checks."""
+    from .core import deviceinfo
+
+    ctx = await _context()
+    try:
+        report = await deviceinfo.collect(ctx.remote, _pick_device(ctx, device))
+    finally:
+        await ctx.stop()
+    for section in report["sections"]:
+        table = Table(show_header=False, title=section["title"], title_justify="left", box=None, padding=(0, 2))
+        for row in section["rows"]:
+            table.add_row(f"[dim]{row['label']}[/dim]", row["value"])
+        console.print(table)
+        console.print()
+    table = Table(show_header=False, title="Authenticity", title_justify="left", box=None, padding=(0, 2))
+    for check in report["checks"]:
+        table.add_row(_MARK[check["status"]], check["label"], check["value"], f"[dim]{check['detail']}[/dim]")
+    console.print(table)
+    color = {"pass": "green", "warn": "yellow", "fail": "red"}[report["verdict"]]
+    console.print(f"\n[bold {color}]{report['message']}[/bold {color}]")
+    for note in report["notes"]:
+        console.print(f"[dim]• {note}[/dim]")
 
 
 @app.command()
