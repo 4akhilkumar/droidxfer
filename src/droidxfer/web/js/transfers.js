@@ -100,8 +100,9 @@ export class TransfersPanel {
     row.bar.classList.toggle('indeterminate', job.status === 'planning');
 
     row.stats.textContent = this.statsText(job);
-    if (row.status !== job.status) {
-      row.status = job.status;
+    const actionKey = `${job.status}:${job.can_retry}`;
+    if (row.status !== actionKey) {
+      row.status = actionKey;
       row.actions.replaceChildren(...this.actionButtons(job));
     }
     this.renderFailures(row, job);

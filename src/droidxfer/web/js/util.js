@@ -37,6 +37,9 @@ const ICONS = {
   play: '<path d="M7 5l12 7-12 7z" fill="currentColor"/>',
   close: '<path d="M6 6l12 12M18 6L6 18" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
   retry: '<path d="M4 12a8 8 0 1 0 2.3-5.7M4 4v5h5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
+  prev: '<path d="M15 5l-7 7 7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
+  next: '<path d="M9 5l7 7-7 7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>',
+  info: '<circle cx="12" cy="12" r="8.5" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M12 11v5.5" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="7.8" r="1.2" fill="currentColor"/>',
   link: '<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>',
 };
 
@@ -58,7 +61,7 @@ export function extension(name) {
   return i > 0 ? name.slice(i + 1).toLowerCase() : '';
 }
 
-export const isThumbable = (name) => IMAGE_EXT.has(extension(name));
+export const isThumbable = (name) => IMAGE_EXT.has(extension(name)) || ['heic', 'heif'].includes(extension(name));
 
 export function fileIcon(entry) {
   if (entry.is_dir) return 'folder';

@@ -3,7 +3,7 @@ name = "droidxfer"
 version = "0.1.0"
 description = "Transfer files between macOS and Android over ADB (USB or Wi-Fi) with a local web UI and CLI."
 readme = "README.md"
-requires-python = ">=3.11,<3.12"
+requires-python = ">=3.11"
 dependencies = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
@@ -11,6 +11,7 @@ dependencies = [
     "rich>=13.7",
     "pillow>=10.4",
     "segno>=1.6",
+    "pillow-heif>=0.18",
 ]
 
 [project.scripts]
@@ -34,4 +35,4 @@ packages = ["src/droidxfer"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]
-filterwarnings = ["ignore:Using `httpx` with `starlette.testclient`:DeprecationWarning"]
+filterwarnings = ["ignore:Using `httpx` with `starlette.testclient`"]

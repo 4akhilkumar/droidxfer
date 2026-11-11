@@ -80,6 +80,7 @@ export async function settingsDialog(settings) {
   f.verify_checksum.checked = settings.verify_checksum;
   f.media_scan.checked = settings.media_scan;
   f.show_hidden.checked = settings.show_hidden;
+  f.external_drives.checked = settings.external_drives;
   f.prefer_usb.checked = settings.prefer_usb;
   f.ask_before_transfer.checked = settings.ask_before_transfer;
   f.adb_path.value = settings.adb_path || '';
@@ -91,6 +92,7 @@ export async function settingsDialog(settings) {
     verify_checksum: f.verify_checksum.checked,
     media_scan: f.media_scan.checked,
     show_hidden: f.show_hidden.checked,
+    external_drives: f.external_drives.checked,
     prefer_usb: f.prefer_usb.checked,
     ask_before_transfer: f.ask_before_transfer.checked,
     adb_path: f.adb_path.value.trim() || null,

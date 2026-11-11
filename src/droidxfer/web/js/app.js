@@ -1,6 +1,7 @@
 // App entry point: wires panes, devices, transfers, dialogs and live events together.
 
 import { api, connectEvents, qs } from './api.js';
+import { DeviceInfoDialog } from './deviceinfo.js';
 import { settingsDialog, transferOptions } from './dialogs.js';
 import { FilePane } from './pane.js';
 import { TransfersPanel } from './transfers.js';
@@ -16,12 +17,14 @@ const state = {
   devices: [],
   adb: { ok: true, error: null },
   deviceId: storage('device', null),
+  volumes: [],
 };
 
 let macPane;
 let androidPane;
 let transfers;
 let wireless;
+let deviceInfo;
 
 const currentDevice = () => state.devices.find((d) => d.id === state.deviceId) || null;
 const deviceReady = () => currentDevice()?.state === 'device';
@@ -38,11 +41,21 @@ const macSource = {
   remove: (paths) => api.post('/api/local/delete', { paths }),
   thumbUrl: (path) => `/api/local/thumb?${qs({ path })}`,
   fileUrl: (path) => `/api/local/file?${qs({ path })}`,
+  previewUrl: (path) => `/api/local/preview?${qs({ path })}`,
+  storage: (path) => api.get(`/api/local/storage?${qs({ path })}`),
   home: () => state.home,
-  places: () =>
-    [['Home', ''], ['Desktop', '/Desktop'], ['Documents', '/Documents'], ['Downloads', '/Downloads'],
+  places: () => [
+    ...[['Home', ''], ['Desktop', '/Desktop'], ['Documents', '/Documents'], ['Downloads', '/Downloads'],
       ['Pictures', '/Pictures'], ['Movies', '/Movies'], ['Music', '/Music']].map(([label, sub]) => ({ label, path: state.home + sub })),
-  crumbBase: (path) => (path === state.home || path.startsWith(`${state.home}/`) ? { label: 'Home', path: state.home } : { label: '/', path: '/' }),
+    ...state.volumes.map((v) => ({ label: `\u{1F5B4} ${v.name}`, path: v.path })),
+  ],
+  crumbBase(path) {
+    if (path === state.home || path.startsWith(`${state.home}/`)) return { label: 'Home', path: state.home };
+    const volume = state.volumes.find((v) => path === v.path || path.startsWith(`${v.path}/`));
+    if (volume) return { label: volume.name, path: volume.path };
+    if (path === '/Volumes' || path.startsWith('/Volumes/')) return { label: 'Volumes', path: '/Volumes' };
+    return { label: '/', path: '/' };
+  },
   remember: (path) => store('macPath', path),
   initialPath: () => storage('macPath', state.home),
 };
@@ -61,11 +74,13 @@ const androidSource = {
     return `The phone is ${device.state}. Waiting for it to become ready\u2026`;
   },
   list: (path, hidden) => api.get(`${devUrl('ls')}?${qs({ path, hidden })}`),
+  storage: (path) => api.get(`${devUrl('storage')}?${qs({ path })}`),
   mkdir: (parent, name) => api.post(devUrl('mkdir'), { parent, name }),
   rename: (path, name) => api.post(devUrl('rename'), { path, name }),
   remove: (paths) => api.post(devUrl('delete'), { paths }),
   thumbUrl: (path) => `${devUrl('thumb')}?${qs({ path })}`,
   fileUrl: (path) => `${devUrl('file')}?${qs({ path })}`,
+  previewUrl: (path) => `${devUrl('preview')}?${qs({ path })}`,
   home: () => '/sdcard',
   places: () =>
     [['Internal storage', '/sdcard'], ['Camera', '/sdcard/DCIM/Camera'], ['Pictures', '/sdcard/Pictures'],
@@ -80,6 +95,15 @@ const androidSource = {
   remember: (path) => store(`androidPath.${state.deviceId}`, path),
   initialPath: () => storage(`androidPath.${state.deviceId}`, '/sdcard'),
 };
+
+async function refreshVolumes() {
+  try {
+    state.volumes = await api.get('/api/local/volumes');
+  } catch {
+    state.volumes = [];
+  }
+  macPane?.renderPlaces();
+}
 
 // ------------------------------------------------------------------ transfers
 async function askOptions(summary) {
@@ -225,6 +249,7 @@ function renderDevices() {
     badge.textContent = device ? device.state : '';
     badge.className = device ? 'badge warn' : 'badge';
   }
+  $('#btn-info').disabled = !deviceReady();
   const adb = $('#adb-status');
   adb.hidden = state.adb.ok;
   adb.textContent = 'ADB unavailable';
@@ -295,6 +320,11 @@ async function init() {
     renderDevices();
     loadAndroid();
   });
+  $('#btn-info').addEventListener('click', () => {
+    if (!deviceReady()) return;
+    deviceInfo ??= new DeviceInfoDialog();
+    deviceInfo.open(currentDevice());
+  });
   $('#btn-wireless').addEventListener('click', () => wireless.open(deviceReady() && currentDevice().connection === 'usb' ? 'usb' : 'qr'));
   $('#btn-settings').addEventListener('click', async () => {
     const changes = await settingsDialog(state.settings);
@@ -303,6 +333,7 @@ async function init() {
       state.settings = await api.put('/api/settings', changes);
       macPane.setShowHidden(state.settings.show_hidden);
       androidPane.setShowHidden(state.settings.show_hidden);
+      refreshVolumes();
       macPane.refresh();
       if (deviceReady()) androidPane.refresh();
       toast('Settings saved', 'success');
@@ -319,6 +350,8 @@ async function init() {
 
   onDevices(session.devices);
   transfers.setAll(session.jobs);
+  refreshVolumes();
+  window.addEventListener('focus', refreshVolumes); // pick up drives plugged in meanwhile
   await macPane.load(macSource.initialPath());
 
   connectEvents(

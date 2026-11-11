@@ -91,6 +91,13 @@ class AdbStream:
             raise AdbError(f"bad length prefix {raw_len!r}") from exc
         return (await self.read_exactly(length)).decode("utf-8", "replace")
 
+    async def read_some(self, n: int = 65536) -> bytes:
+        """Read up to `n` bytes; returns b"" at end of stream."""
+        try:
+            return await self.reader.read(n)
+        except (ConnectionError, OSError) as exc:
+            raise AdbConnectionError(f"connection lost while reading: {exc}") from exc
+
     async def read_all(self) -> bytes:
         chunks = []
         try:

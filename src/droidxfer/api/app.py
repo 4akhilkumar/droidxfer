@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from ..adb import AdbError
@@ -48,6 +49,28 @@ def _handler(status: int):
     return handle
 
 
+class RevalidatingStaticFiles(StaticFiles):
+    """Static assets that the browser must revalidate (ETag -> 304) on every load.
+
+    Without a Cache-Control header browsers cache files heuristically based on their age, so after an
+    update an old stylesheet could be reused next to new scripts and break the UI.
+    """
+
+    def file_response(self, *args, **kwargs) -> Response:
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
+def asset_version(web_dir: Path = WEB_DIR) -> str:
+    """Short hash of the web assets' names, sizes and mtimes; changes whenever any asset changes."""
+    digest = hashlib.sha256()
+    for path in sorted(p for p in web_dir.rglob("*") if p.is_file()):
+        st = path.stat()
+        digest.update(f"{path.relative_to(web_dir)}|{st.st_size}|{st.st_mtime_ns}\n".encode())
+    return digest.hexdigest()[:12]
+
+
 def create_app(*, token: str, port: int, context: AppContext | None = None, track: bool = True) -> FastAPI:
     ctx = context or AppContext()
 
@@ -64,11 +87,16 @@ def create_app(*, token: str, port: int, context: AppContext | None = None, trac
     for exc_type, status in _STATUS:
         app.add_exception_handler(exc_type, _handler(status))
     app.include_router(router, prefix="/api")
-    app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
+    # Assets live under a versioned prefix, so after an update the browser can't mix cached old files
+    # with new ones (relative imports between the JS modules inherit the prefix).
+    version = asset_version()
+    static_prefix = f"/static/{version}"
+    app.mount(static_prefix, RevalidatingStaticFiles(directory=WEB_DIR), name="static")
+    index_html = (WEB_DIR / "index.html").read_text().replace('"/static/', f'"{static_prefix}/')
 
     @app.get("/", include_in_schema=False)
-    async def index() -> FileResponse:
-        return FileResponse(WEB_DIR / "index.html", headers={"Cache-Control": "no-store"})
+    async def index() -> HTMLResponse:
+        return HTMLResponse(index_html, headers={"Cache-Control": "no-store"})
 
     app.add_middleware(SecurityMiddleware, token=token, port=port)
     return app

@@ -14,6 +14,7 @@
       <label for="device-select">Device</label>
       <select id="device-select"></select>
       <span id="device-badge" class="badge"></span>
+      <button id="btn-info" class="btn small" type="button" title="Phone details and authenticity checks" disabled>Phone info</button>
     </div>
     <span id="adb-status" class="badge error" hidden></span>
     <span id="conn-lost" class="badge warn" hidden>Reconnecting&hellip;</span>
@@ -85,6 +86,7 @@
         <label class="radio"><input type="radio" name="conflict" value="rename"> Keep both (add a number to the new file)</label>
         <label class="radio"><input type="radio" name="conflict" value="overwrite"> Replace it</label>
         <label class="radio"><input type="radio" name="conflict" value="skip"> Skip it</label>
+        <label class="radio"><input type="radio" name="conflict" value="skip_identical"> Skip it if it's identical (same size and date), otherwise replace it</label>
       </fieldset>
       <label class="check"><input type="checkbox" name="verify"> Verify each file with an MD5 checksum (slower)</label>
       <label class="check"><input type="checkbox" name="remember"> Remember this choice and don't ask again</label>
@@ -103,6 +105,7 @@
           <option value="rename">Keep both</option>
           <option value="overwrite">Replace</option>
           <option value="skip">Skip</option>
+          <option value="skip_identical">Skip if identical, otherwise replace</option>
         </select>
       </label>
       <label class="check"><input type="checkbox" name="ask_before_transfer"> Ask before every transfer</label>
@@ -110,6 +113,7 @@
       <label class="check"><input type="checkbox" name="media_scan"> Make copied photos/videos show up in the phone's Gallery right away</label>
       <label class="check"><input type="checkbox" name="prefer_usb"> Prefer USB when the phone is connected by both USB and Wi-Fi</label>
       <label class="check"><input type="checkbox" name="show_hidden"> Show hidden files</label>
+      <label class="check"><input type="checkbox" name="external_drives"> Allow external drives (/Volumes) on the Mac side</label>
       <label class="field"><span>adb path (leave empty to detect automatically)</span><input name="adb_path" spellcheck="false" placeholder="/opt/homebrew/bin/adb"></label>
       <div class="actions">
         <button type="button" class="btn" data-cancel>Cancel</button>

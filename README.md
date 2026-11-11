@@ -15,13 +15,13 @@ brew install uv
 brew install --cask android-platform-tools
 uv --version && adb version
 ```
-You don't need to install Python yourself. `uv` downloads Python 3.11.16, the version pinned in `.python-version`.
+You don't need to install Python yourself. `uv` downloads Python 3.12.6, the version pinned in `.python-version` (any Python 3.11+ works).
 
 ### 2. Get the code
 Copy the project folder to the new Mac (for example `git clone <your-repo-url> mac_android`, or copy/unzip the folder). Then run:
 ```bash
 cd mac_android
-uv sync                 # creates .venv with Python 3.11.16 and all dependencies
+uv sync                 # creates .venv with Python 3.12.6 and all dependencies
 uv run pytest           # optional: runs the test suite against a fake phone, no device needed
 ```
 
@@ -66,18 +66,23 @@ The phone and the Mac must be on the same Wi-Fi network. On the phone, turn on *
 | Device is `unauthorized` | Unlock the phone and accept the prompt. If no prompt appears, go to **Developer options > Revoke USB debugging authorizations** and reconnect. |
 | "ADB unavailable" in the UI | Check `which adb`. Set the full path in **Settings > adb path** (e.g. `/opt/homebrew/bin/adb`). |
 | Android Studio is also installed | Two different adb versions will keep restarting each other's server. Use one adb (e.g. put Homebrew's first in `PATH`) or set the same path in Settings. |
+| `uv run ...` fails with "Failed to spawn" | The project folder was moved after `.venv` was created. Run `rm -rf .venv && uv sync`. |
 | `address already in use` | Another server is already on that port. Use `--port 9000` or stop the other one. |
 | "Session expired" in the browser | The server was restarted. Open the new URL printed in the terminal. |
 | Wi-Fi device not found | Keep the Wireless debugging screen open on the phone, use the same network, and check that the router doesn't isolate clients (guest networks often do). |
 
-Settings and saved Wi-Fi endpoints are stored in `~/Library/Application Support/droidxfer/`. Thumbnails are cached in `~/Library/Caches/droidxfer/`.
+Settings and saved Wi-Fi endpoints are stored in `~/Library/Application Support/droidxfer/`. Thumbnails are cached in `~/Library/Caches/droidxfer/` (limited to about 200 MB; the least recently used are removed first).
 
 ### Web UI
-- Left pane: Mac (your home folder). Right pane: Android (starts at `/sdcard`).
+- Left pane: Mac (your home folder, plus external drives under `/Volumes`, which appear in **Go to…**; turn this off in **Settings**). Right pane: Android (starts at `/sdcard`).
+- The status bar of each pane shows how much free space is left there. A copy that clearly won't fit fails right away instead of halfway (checked when "Keep both" is selected).
 - Drag files between the panes, or select them and use the arrow buttons. Dropping on a folder row copies into that folder.
 - You can also drag files from Finder onto either pane.
 - Select files with click, Cmd-click and Shift-click. Keyboard shortcuts: Cmd+A, Enter, Backspace (go up), F2 (rename), Delete.
-- Toolbar actions: new folder, rename, delete (Mac items go to the Trash; deletes on the phone are permanent), thumbnail view, show hidden files.
+- Toolbar actions: new folder, rename, delete (Mac items go to the macOS Trash; deletes on the phone are permanent), thumbnail view (including HEIC photos), show hidden files.
+- When a file already exists you can keep both, replace it, skip it, or **skip it if identical** (same size and date, otherwise replace). The last option makes repeated backups of a folder like `DCIM/Camera` copy only new or changed files.
+- Double-click (or Enter) on a photo, video or audio file in either pane to open it in the built-in viewer. Use ← → to step through the folder and **Download** to save it. Videos can be seeked. HEIC and TIFF photos are converted for display. Other files open in a new tab (text) or download.
+- **Phone info** (next to the device picker) shows the phone's hardware, software and battery details, with battery health, charge cycles and manufacture date where the phone exposes them. It also runs authenticity checks: verified boot, bootloader lock, official build, firmware consistency, root, SELinux, encryption and security patch age. **Copy as text** copies the full report. IMEI can't be read over adb on Android 10+, so dial `*#06#` on the phone instead.
 - Transfer queue: shows progress, speed and time left, with pause, resume, cancel and retry.
 - **Wi-Fi...** opens the wireless options: QR pairing, pairing code, connect, or "From USB" (`adb tcpip 5555`).
 - If the phone is connected by both USB and Wi-Fi, USB is used. If the cable is unplugged during a transfer, it continues over Wi-Fi.
@@ -85,9 +90,11 @@ Settings and saved Wi-Fi endpoints are stored in `~/Library/Application Support/
 ### CLI
 ```bash
 uv run droidxfer devices
+uv run droidxfer info                     # phone details + authenticity checks
 uv run droidxfer ls /sdcard/DCIM/Camera
 uv run droidxfer push ~/Pictures/trip /sdcard/Pictures --conflict rename
 uv run droidxfer pull /sdcard/DCIM/Camera ~/Downloads --verify
+uv run droidxfer pull /sdcard/DCIM/Camera ~/Backup --conflict skip_identical   # incremental backup
 uv run droidxfer qr                       # pair over Wi-Fi by scanning a QR code
 uv run droidxfer pair 192.168.1.20:37099 123456
 uv run droidxfer connect 192.168.1.20:41235
@@ -101,4 +108,4 @@ uv run pytest
 The tests use an in-process fake adb server (`tests/fake_adb.py`), so no phone is needed.
 
 ## Security
-The server listens only on `127.0.0.1`. Access requires a random token for each run, stored in an HttpOnly, SameSite=Strict cookie. Requests with an unexpected Host, Origin or a cross-site `Sec-Fetch-Site` header are rejected. Mac paths are limited to your home folder. Protected locations on the phone (`/`, `/sdcard`, `/data`, ...) can't be deleted or renamed.
+The server listens only on `127.0.0.1`. Access requires a random token for each run, stored in an HttpOnly, SameSite=Strict cookie. Requests with an unexpected Host, Origin or a cross-site `Sec-Fetch-Site` header are rejected. Mac paths are limited to your home folder and, if **Allow external drives** is on (the default), drives mounted under `/Volumes` (the boot disk's `/Volumes/Macintosh HD` link to `/` is not allowed). Protected locations on the phone (`/`, `/sdcard`, `/data`, ...) can't be deleted or renamed.

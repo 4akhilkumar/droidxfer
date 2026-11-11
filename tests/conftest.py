@@ -4,6 +4,12 @@ from droidxfer.core.context import AppContext
 from fake_adb import FakeAdb
 
 
+@pytest.fixture(autouse=True)
+def no_system_trash(monkeypatch):
+    """Never let tests move files into the real macOS Trash."""
+    monkeypatch.setattr("droidxfer.core.localfs.TRASH_TOOL", "/nonexistent/trash")
+
+
 @pytest.fixture
 def device_root(tmp_path):
     root = tmp_path / "device"

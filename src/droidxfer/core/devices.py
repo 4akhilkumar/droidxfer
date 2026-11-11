@@ -200,6 +200,10 @@ class DeviceManager:
             await self._resolve(t)
         self._publish()
 
+    def republish(self) -> None:
+        """Re-send the device snapshot if it changed for reasons other than adb (e.g. settings)."""
+        self._publish()
+
     def _publish(self) -> None:
         snapshot = self.snapshot()
         encoded = json.dumps(snapshot, sort_keys=True)

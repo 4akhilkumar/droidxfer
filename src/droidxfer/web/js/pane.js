@@ -1,6 +1,7 @@
 // A file browser pane used for both the Mac and the Android side.
 
 import { confirmDialog, promptText } from './dialogs.js';
+import { canPreview, openPreview } from './preview.js';
 import { el, fileIcon, formatBytes, formatDate, icon, isThumbable, storage, store, toast } from './util.js';
 
 let activeDrag = null; // { pane, paths } while dragging rows between panes
@@ -24,6 +25,7 @@ export class FilePane {
     this.anchor = null;
     this.filter = '';
     this.showHidden = false;
+    this.freeText = '';
     this.sort = storage(`sort.${source.kind}`, { key: 'name', dir: 1 });
     this.view = storage(`view.${source.kind}`, 'list');
     this.build();
@@ -153,8 +155,10 @@ export class FilePane {
       this.anchor = null;
       this.source.remember(this.path);
       this.hideMessage();
+      if (changed) this.freeText = '';
       this.render();
       if (select) this.scrollToSelection();
+      this.loadFreeSpace(this.path);
     } catch (err) {
       toast(err.message, 'error');
       const home = this.source.home();
@@ -163,6 +167,18 @@ export class FilePane {
     } finally {
       this.root.classList.remove('loading');
     }
+  }
+
+  async loadFreeSpace(path) {
+    if (!this.source.storage) return;
+    try {
+      const { free } = await this.source.storage(path);
+      if (path !== this.path) return; // navigated away meanwhile
+      this.freeText = `${formatBytes(free)} free`;
+    } catch {
+      this.freeText = '';
+    }
+    this.updateSelection();
   }
 
   refresh() {
@@ -185,6 +201,7 @@ export class FilePane {
 
   open(entry) {
     if (entry.is_dir) this.load(entry.path);
+    else if (canPreview(entry)) openPreview(this.source, this.visible, entry);
     else window.open(this.source.fileUrl(entry.path), '_blank', 'noopener');
   }
 
@@ -200,6 +217,7 @@ export class FilePane {
     this.message.textContent = text;
     this.crumbs.replaceChildren();
     this.status.textContent = '';
+    this.freeText = '';
     this.updateButtons();
   }
 
@@ -337,7 +355,8 @@ export class FilePane {
     const bytes = chosen.reduce((sum, e) => sum + (e.is_dir ? 0 : e.size), 0);
     this.status.textContent =
       `${this.visible.length} item${this.visible.length === 1 ? '' : 's'}` +
-      (chosen.length ? ` \u00B7 ${chosen.length} selected${bytes ? ` (${formatBytes(bytes)})` : ''}` : '');
+      (chosen.length ? ` \u00B7 ${chosen.length} selected${bytes ? ` (${formatBytes(bytes)})` : ''}` : '') +
+      (this.freeText ? ` \u00B7 ${this.freeText}` : '');
     this.updateButtons();
     this.handlers.onSelection?.(this);
   }

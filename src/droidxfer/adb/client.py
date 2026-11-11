@@ -191,6 +191,28 @@ class AdbClient:
 
         return await asyncio.wait_for(run(), timeout)
 
+    async def shell_stream(self, serial: str, command: str, *, v2: bool = True) -> AsyncIterator[bytes]:
+        """Run a shell command and yield its stdout as it arrives (stderr is discarded)."""
+        s = await self.open_service(serial, f"shell,v2,raw:{command}" if v2 else f"exec:{command}")
+        try:
+            if not v2:
+                while chunk := await s.read_some():
+                    yield chunk
+                return
+            await s.write(_SHELL_HDR.pack(_SHELL_CLOSE_STDIN, 0))
+            while True:
+                try:
+                    ident, length = _SHELL_HDR.unpack(await s.read_exactly(_SHELL_HDR.size))
+                except AdbError:
+                    return
+                data = await s.read_exactly(length)
+                if ident == _SHELL_STDOUT:
+                    yield data
+                elif ident == _SHELL_EXIT:
+                    return
+        finally:
+            await s.close()
+
     async def sync(self, serial: str, features: set[str] | frozenset[str] = frozenset()) -> SyncConnection:
         return SyncConnection(await self.open_service(serial, "sync:"), features)
 
