@@ -20,7 +20,10 @@ _PROPS = (
     "getprop ro.serialno; getprop ro.product.manufacturer; getprop ro.product.model; "
     "getprop ro.build.version.release; getprop ro.build.version.sdk"
 )
-_STATE_RANK = {"device": 0, "unauthorized": 1, "authorizing": 2, "connecting": 3, "offline": 4}
+_STATE_RANK = {
+    "device": 0, "unauthorized": 1, "authorizing": 2, "connecting": 3, "offline": 4,
+    "no_file_transfer": 5, "ptp": 5,
+}
 MAX_RESOLVE_ATTEMPTS = 5
 
 
@@ -39,7 +42,7 @@ class DeviceUnavailable(DeviceError):
 @dataclass
 class Transport:
     serial: str
-    kind: str  # "usb" | "wifi"
+    kind: str  # "usb" | "wifi" (adb) | "mtp" (File transfer mode, no USB debugging needed)
     state: str = "unknown"
     model_hint: str | None = None
     serialno: str | None = None
@@ -69,10 +72,12 @@ class Device:
     transports: list[Transport]
 
     def active(self, prefer_usb: bool = True) -> Transport | None:
+        """The transport to use: adb (USB or Wi-Fi, per the setting) first, MTP last."""
         ready = [t for t in self.transports if t.state == "device" and t.resolved]
         if not ready:
             return None
-        ready.sort(key=lambda t: (t.kind != "usb") if prefer_usb else (t.kind == "usb"))
+        order = {"usb": 0, "wifi": 1, "mtp": 2} if prefer_usb else {"wifi": 0, "usb": 1, "mtp": 2}
+        ready.sort(key=lambda t: order.get(t.kind, 9))
         return ready[0]
 
     def _info(self) -> Transport | None:
@@ -81,6 +86,7 @@ class Device:
     def to_dict(self, prefer_usb: bool = True) -> dict:
         info = self._info()
         active = self.active(prefer_usb)
+        adb = active is not None and active.kind != "mtp"
         hint = next((t.model_hint for t in self.transports if t.model_hint), None)
         model = info.model if info else (hint or "").replace("_", " ")
         manufacturer = info.manufacturer if info else ""
@@ -98,6 +104,8 @@ class Device:
             "connection": active.kind if active else None,
             "active_serial": active.serial if active else None,
             "transports": [t.to_dict() for t in self.transports],
+            # What the active connection can do; MTP has no shell, Wi-Fi switching or checksums.
+            "capabilities": {"adb": adb, "verify": adb, "full_info": adb},
         }
 
 
@@ -108,6 +116,7 @@ class DeviceManager:
         self.config = config
         self.adb_error: str | None = None
         self._transports: dict[str, Transport] = {}
+        self._mtp: dict[str, Transport] = {}
         self._lock = asyncio.Lock()
         self._task: asyncio.Task | None = None
         self._last_snapshot = ""
@@ -200,6 +209,11 @@ class DeviceManager:
             await self._resolve(t)
         self._publish()
 
+    def set_mtp_transports(self, transports: list[Transport]) -> None:
+        """Replace the MTP ("File transfer" mode) transports found by the USB scanner."""
+        self._mtp = {t.serial: t for t in transports}
+        self._publish()
+
     def republish(self) -> None:
         """Re-send the device snapshot if it changed for reasons other than adb (e.g. settings)."""
         self._publish()
@@ -214,7 +228,7 @@ class DeviceManager:
     # queries -------------------------------------------------------------------
     def devices(self) -> list[Device]:
         groups: dict[str, list[Transport]] = {}
-        for t in self._transports.values():
+        for t in (*self._transports.values(), *self._mtp.values()):
             groups.setdefault(t.group_key, []).append(t)
         return [Device(key, ts) for key, ts in sorted(groups.items())]
 
@@ -240,7 +254,11 @@ class DeviceManager:
             t = device.active(self.config.settings.prefer_usb)
         if t is None:
             states = ", ".join(f"{x.kind}:{x.state}" for x in device.transports)
-            hint = " Unlock the phone and accept the USB debugging prompt." if "unauthorized" in states else ""
+            hint = ""
+            if "unauthorized" in states:
+                hint = " Unlock the phone and accept the USB debugging prompt."
+            elif "no_file_transfer" in states or "ptp" in states:
+                hint = " Unlock the phone, open the USB notification and choose File transfer."
             raise DeviceUnavailable(f"device {device_id} is not ready ({states}).{hint}")
         return t
 

@@ -28,6 +28,8 @@ let deviceInfo;
 
 const currentDevice = () => state.devices.find((d) => d.id === state.deviceId) || null;
 const deviceReady = () => currentDevice()?.state === 'device';
+const CONNECTION_LABEL = { usb: 'USB', wifi: 'Wi-Fi', mtp: 'USB \u00B7 MTP' };
+const connectionLabel = (c) => CONNECTION_LABEL[c] || c;
 const devUrl = (suffix) => `/api/devices/${encodeURIComponent(state.deviceId)}/${suffix}`;
 
 const macSource = {
@@ -71,6 +73,12 @@ const androidSource = {
       return 'No Android device connected.\n\nPlug in your phone with USB debugging enabled (Settings > System > Developer options), or click "Wi-Fi" to connect wirelessly.';
     }
     if (device.state === 'unauthorized') return 'Unlock your phone and tap "Allow" on the USB debugging prompt.';
+    if (device.state === 'no_file_transfer') {
+      return 'The phone is connected but not sharing files.\n\nUnlock it, pull down the notifications, tap the "USB" notification and choose "File transfer". (Or turn on USB debugging to use adb.)';
+    }
+    if (device.state === 'ptp') {
+      return 'The phone is in photo transfer (PTP) mode, which only shows photos.\n\nUnlock it, tap the "USB" notification and choose "File transfer" instead.';
+    }
     return `The phone is ${device.state}. Waiting for it to become ready\u2026`;
   },
   list: (path, hidden) => api.get(`${devUrl('ls')}?${qs({ path, hidden })}`),
@@ -107,15 +115,16 @@ async function refreshVolumes() {
 
 // ------------------------------------------------------------------ transfers
 async function askOptions(summary) {
-  const defaults = { conflict: state.settings.default_conflict, verify: state.settings.verify_checksum };
+  const canVerify = currentDevice()?.capabilities?.verify !== false;
+  const defaults = { conflict: state.settings.default_conflict, verify: state.settings.verify_checksum && canVerify };
   if (!state.settings.ask_before_transfer) return defaults;
-  const choice = await transferOptions({ summary, ...defaults });
+  const choice = await transferOptions({ summary, ...defaults, canVerify });
   if (!choice) return null;
   if (choice.remember) {
     try {
       state.settings = await api.put('/api/settings', {
         default_conflict: choice.conflict,
-        verify_checksum: choice.verify,
+        ...(canVerify ? { verify_checksum: choice.verify } : {}),
         ask_before_transfer: false,
       });
       toast('Saved as default. You can change this in Settings.');
@@ -235,7 +244,7 @@ function renderDevices() {
   } else {
     select.disabled = false;
     for (const d of state.devices) {
-      const how = d.connection ? (d.connection === 'usb' ? 'USB' : 'Wi-Fi') : d.state;
+      const how = d.connection ? connectionLabel(d.connection) : d.state.replaceAll('_', ' ');
       select.append(new Option(`${d.name} (${how})`, d.id));
     }
     select.value = state.deviceId ?? '';
@@ -243,10 +252,13 @@ function renderDevices() {
   const device = currentDevice();
   const badge = $('#device-badge');
   if (device?.connection) {
-    badge.textContent = device.connection === 'usb' ? 'USB' : 'Wi-Fi';
-    badge.className = `badge ${device.connection}`;
+    badge.textContent = connectionLabel(device.connection);
+    badge.className = `badge ${device.connection === 'mtp' ? 'usb' : device.connection}`;
+    badge.title = device.connection === 'mtp'
+      ? 'File transfer (MTP) mode: files only. Turn on USB debugging for phone info checks, Wi-Fi and MD5 verification.'
+      : '';
   } else {
-    badge.textContent = device ? device.state : '';
+    badge.textContent = device ? device.state.replaceAll('_', ' ') : '';
     badge.className = device ? 'badge warn' : 'badge';
   }
   $('#btn-info').disabled = !deviceReady();
@@ -279,7 +291,7 @@ function onDevices(snapshot) {
   if (before?.id !== now?.id || wasReady !== deviceReady()) {
     loadAndroid();
   } else if (now && before?.connection && now.connection && before.connection !== now.connection) {
-    toast(`Now using ${now.connection === 'usb' ? 'USB' : 'Wi-Fi'} for ${now.name}`);
+    toast(`Now using ${connectionLabel(now.connection)} for ${now.name}`);
     androidPane.setSubtitle(`${now.name}${now.android_version ? ` \u00B7 Android ${now.android_version}` : ''}`);
   } else if (!deviceReady()) {
     androidPane.showMessage(androidSource.unavailableMessage());

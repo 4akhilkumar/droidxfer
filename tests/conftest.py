@@ -10,6 +10,12 @@ def no_system_trash(monkeypatch):
     monkeypatch.setattr("droidxfer.core.localfs.TRASH_TOOL", "/nonexistent/trash")
 
 
+@pytest.fixture(autouse=True)
+def no_real_usb(monkeypatch):
+    """Never scan the machine's real USB bus (a phone may be plugged in while tests run)."""
+    monkeypatch.setattr("droidxfer.core.mtpdevices.scan_usb", lambda: [])
+
+
 @pytest.fixture
 def device_root(tmp_path):
     root = tmp_path / "device"

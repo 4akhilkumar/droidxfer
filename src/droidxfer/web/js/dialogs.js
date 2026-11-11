@@ -53,13 +53,15 @@ export async function confirmDialog({ title, message, okLabel = 'OK', danger = f
   return (await waitClose(dialog)) === 'ok';
 }
 
-export async function transferOptions({ summary, conflict, verify }) {
+export async function transferOptions({ summary, conflict, verify, canVerify = true }) {
   const dialog = $('#dlg-transfer');
   wire(dialog);
   $('[data-summary]', dialog).textContent = summary;
   const form = $('form', dialog);
   form.elements.conflict.value = conflict;
-  form.elements.verify.checked = verify;
+  form.elements.verify.checked = verify && canVerify;
+  form.elements.verify.disabled = !canVerify;
+  form.elements.verify.closest('label').title = canVerify ? '' : 'MD5 checks need USB debugging; this phone is in File transfer (MTP) mode.';
   form.elements.remember.checked = false;
   dialog.returnValue = '';
   dialog.showModal();
@@ -67,7 +69,7 @@ export async function transferOptions({ summary, conflict, verify }) {
   if ((await waitClose(dialog)) !== 'ok') return null;
   return {
     conflict: form.elements.conflict.value,
-    verify: form.elements.verify.checked,
+    verify: canVerify && form.elements.verify.checked,
     remember: form.elements.remember.checked,
   };
 }
@@ -81,6 +83,7 @@ export async function settingsDialog(settings) {
   f.media_scan.checked = settings.media_scan;
   f.show_hidden.checked = settings.show_hidden;
   f.external_drives.checked = settings.external_drives;
+  f.mtp.checked = settings.mtp;
   f.prefer_usb.checked = settings.prefer_usb;
   f.ask_before_transfer.checked = settings.ask_before_transfer;
   f.adb_path.value = settings.adb_path || '';
@@ -93,6 +96,7 @@ export async function settingsDialog(settings) {
     media_scan: f.media_scan.checked,
     show_hidden: f.show_hidden.checked,
     external_drives: f.external_drives.checked,
+    mtp: f.mtp.checked,
     prefer_usb: f.prefer_usb.checked,
     ask_before_transfer: f.ask_before_transfer.checked,
     adb_path: f.adb_path.value.trim() || null,

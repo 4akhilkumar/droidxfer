@@ -12,6 +12,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from ..adb import AdbError
+from ..mtp import LinkError, MtpError
 from ..core.context import AppContext
 from ..core.devices import DeviceNotFound, DeviceUnavailable
 from ..core.paths import PathError
@@ -36,6 +37,8 @@ _STATUS: list[tuple[type[BaseException], int]] = [
     (FileExistsError, 409),
     (DeviceUnavailable, 409),
     (AdbError, 502),
+    (MtpError, 502),
+    (LinkError, 503),
     (asyncio.TimeoutError, 504),
     (OSError, 500),
 ]

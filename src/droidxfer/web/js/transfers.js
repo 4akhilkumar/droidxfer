@@ -99,7 +99,7 @@ export class TransfersPanel {
     row.fill.style.width = `${Math.min(100, Math.max(0, pct * 100)).toFixed(1)}%`;
     row.bar.classList.toggle('indeterminate', job.status === 'planning');
 
-    row.stats.textContent = this.statsText(job);
+    row.stats.textContent = this.statsText(job) + (job.notice ? ` \u00B7 ${job.notice}` : '');
     const actionKey = `${job.status}:${job.can_retry}`;
     if (row.status !== actionKey) {
       row.status = actionKey;

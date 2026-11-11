@@ -53,6 +53,13 @@ uv tool install --reinstall .   # after updating the code
 uv tool uninstall droidxfer     # to remove it
 ```
 
+### Without USB debugging (File transfer / MTP)
+You can also use droidxfer **without Developer options**. Plug in the phone, unlock it, tap the **USB** notification and choose **File transfer**. droidxfer finds it within a couple of seconds and shows it as "USB · MTP". Android forgets this choice when you unplug, so you choose File transfer each time you connect.
+
+Over MTP you can browse, copy both ways (including "skip if identical"; file dates are kept), rename, delete, create folders, see thumbnails, use the viewer and see free space. On a USB 3 cable it's much faster than adb (about 200 MB/s versus 40 MB/s in our tests). It can't do the following, which need USB debugging: folders outside shared storage (such as `Android/data` or `/`), MD5 verification, Wi-Fi, and the full Phone info with authenticity checks (MTP shows only model, serial, battery level and storage).
+
+If USB debugging is also on, droidxfer uses adb. droidxfer opens the phone's MTP connection only while it needs it and releases it after 30 seconds, so Image Capture or Photos can still use the phone. Turn MTP off in **Settings** if you don't want droidxfer to use it.
+
 ### 6. Optional: Wi-Fi
 The phone and the Mac must be on the same Wi-Fi network. On the phone, turn on **Developer options > Wireless debugging**. Then in the app click **Wi-Fi…** and either:
 - **QR code**: on the phone, tap **Pair device with QR code** and scan it.
@@ -67,6 +74,8 @@ The phone and the Mac must be on the same Wi-Fi network. On the phone, turn on *
 | "ADB unavailable" in the UI | Check `which adb`. Set the full path in **Settings > adb path** (e.g. `/opt/homebrew/bin/adb`). |
 | Android Studio is also installed | Two different adb versions will keep restarting each other's server. Use one adb (e.g. put Homebrew's first in `PATH`) or set the same path in Settings. |
 | `uv run ...` fails with "Failed to spawn" | The project folder was moved after `.venv` was created. Run `rm -rf .venv && uv sync`. |
+| Phone shows "no file transfer" | Unlock the phone, tap the **USB** notification and choose **File transfer** (not "No data transfer" or "PTP"). |
+| "another app is using the phone's file transfer connection" | Quit Image Capture, Photos, Android File Transfer, OpenMTP or MacDroid. If it keeps happening, run `killall ptpcamerad` (macOS restarts it when needed). |
 | `address already in use` | Another server is already on that port. Use `--port 9000` or stop the other one. |
 | "Session expired" in the browser | The server was restarted. Open the new URL printed in the terminal. |
 | Wi-Fi device not found | Keep the Wireless debugging screen open on the phone, use the same network, and check that the router doesn't isolate clients (guest networks often do). |
