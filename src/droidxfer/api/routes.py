@@ -239,6 +239,66 @@ async def device_tcpip(device_id: str, body: TcpipBody, ctx: AppContext = Ctx) -
     return {"message": await ctx.wireless.enable_tcpip(device_id, body.port)}
 
 
+# apps (remove preinstalled apps) -----------------------------------------------------
+class AppsBody(BaseModel):
+    action: Literal["disable", "uninstall", "restore"]
+    packages: list[str] = Field(min_length=1, max_length=2000)
+    expert: bool = False
+
+
+class ImportBody(BaseModel):
+    document: dict
+    expert: bool = False
+
+
+@router.get("/devices/{device_id}/apps")
+async def apps_list(device_id: str, ctx: AppContext = Ctx) -> dict:
+    return await ctx.apps.list(device_id)
+
+
+@router.post("/devices/{device_id}/apps/plan")
+async def apps_plan(device_id: str, body: AppsBody, ctx: AppContext = Ctx) -> dict:
+    return {"steps": await ctx.apps.plan(device_id, body.action, body.packages, expert=body.expert)}
+
+
+@router.post("/devices/{device_id}/apps/apply")
+async def apps_apply(device_id: str, body: AppsBody, ctx: AppContext = Ctx) -> dict:
+    return {"results": await ctx.apps.apply(device_id, body.action, body.packages, expert=body.expert)}
+
+
+@router.post("/devices/{device_id}/apps/restore-all")
+async def apps_restore_all(device_id: str, ctx: AppContext = Ctx) -> dict:
+    return {"results": await ctx.apps.restore_all(device_id)}
+
+
+@router.get("/devices/{device_id}/apps/history")
+async def apps_history(device_id: str, ctx: AppContext = Ctx) -> dict:
+    return ctx.apps.history(device_id)
+
+
+@router.get("/devices/{device_id}/apps/export")
+async def apps_export(device_id: str, ctx: AppContext = Ctx) -> dict:
+    return await ctx.apps.export(device_id)
+
+
+@router.post("/devices/{device_id}/apps/import-plan")
+async def apps_import_plan(device_id: str, body: ImportBody, ctx: AppContext = Ctx) -> dict:
+    return {"steps": await ctx.apps.import_plan(device_id, body.document, expert=body.expert)}
+
+
+@router.get("/apps/catalog")
+async def apps_catalog(ctx: AppContext = Ctx) -> dict:
+    return ctx.catalog.status()
+
+
+@router.post("/apps/catalog/fetch")
+async def apps_catalog_fetch(ctx: AppContext = Ctx) -> dict:
+    try:
+        return await asyncio.to_thread(ctx.catalog.fetch_community)
+    except (OSError, ValueError) as exc:  # network errors (URLError is an OSError) or a bad file
+        raise HTTPException(502, f"could not download the community list: {exc}") from None
+
+
 # Mac ------------------------------------------------------------------------------
 @router.get("/local/ls")
 async def local_ls(path: str = "~", hidden: bool = False, ctx: AppContext = Ctx) -> dict:

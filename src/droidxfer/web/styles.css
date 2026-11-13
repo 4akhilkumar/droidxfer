@@ -1447,3 +1447,140 @@ dialog.info { width: min(820px, 96vw); }
   font-size: 12px;
   line-height: 1.5;
 }
+
+/* -------------------------------------------------------------- apps */
+dialog.apps {
+  width: min(980px, 96vw);
+  height: min(860px, 92dvh);
+  max-height: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+dialog.apps:not([open]) { display: none; }
+
+.apps-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.apps-catalog {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.apps-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.apps-filters input[type="search"] { flex: 1 1 220px; }
+
+.apps-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.apps-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: 4px 12px;
+  align-items: center;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border-subtle);
+  cursor: pointer;
+}
+
+.apps-row:hover { background: var(--row-hover); }
+.apps-row.is-locked { cursor: default; opacity: 0.75; }
+.apps-main { min-width: 0; }
+
+.apps-name {
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.apps-pkg {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: var(--muted);
+  word-break: break-all;
+}
+
+.apps-desc {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.4;
+  margin-top: 2px;
+}
+
+.apps-tag {
+  font-size: 10px;
+  font-weight: 500;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.apps-rating,
+.apps-state {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  text-align: center;
+}
+
+.apps-rating.safe { background: var(--success-soft); color: var(--success); }
+.apps-rating.probably_safe { background: var(--accent-soft); color: var(--accent); }
+.apps-rating.advanced { background: var(--warn-soft); color: var(--warn); }
+.apps-rating.unsafe { background: var(--danger-soft); color: var(--danger); }
+.apps-rating.unknown { background: var(--panel-2); color: var(--muted); border: 1px solid var(--border); }
+.apps-state { color: var(--muted); min-width: 84px; }
+.apps-state.disabled { color: var(--warn); }
+.apps-state.uninstalled { color: var(--danger); }
+
+.apps-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.apps-count {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.apps-confirm-list {
+  margin: 0;
+  padding-left: 20px;
+  max-height: 32dvh;
+  overflow: auto;
+  line-height: 1.6;
+}
+
+.apps-confirm-list.muted { color: var(--muted); }
+
+.apps-warning {
+  color: var(--warn);
+  font-size: 12px;
+  line-height: 1.4;
+}

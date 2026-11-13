@@ -1,6 +1,7 @@
 // App entry point: wires panes, devices, transfers, dialogs and live events together.
 
 import { api, connectEvents, qs } from './api.js';
+import { AppsDialog } from './apps.js';
 import { DeviceInfoDialog } from './deviceinfo.js';
 import { settingsDialog, transferOptions } from './dialogs.js';
 import { FilePane } from './pane.js';
@@ -25,6 +26,7 @@ let androidPane;
 let transfers;
 let wireless;
 let deviceInfo;
+let appsDialog;
 
 const currentDevice = () => state.devices.find((d) => d.id === state.deviceId) || null;
 const deviceReady = () => currentDevice()?.state === 'device';
@@ -262,6 +264,10 @@ function renderDevices() {
     badge.className = device ? 'badge warn' : 'badge';
   }
   $('#btn-info').disabled = !deviceReady();
+  $('#btn-apps').disabled = !deviceReady() || device?.capabilities?.adb === false;
+  $('#btn-apps').title = device?.capabilities?.adb === false
+    ? 'Removing apps needs USB debugging; this phone is in File transfer (MTP) mode.'
+    : 'Disable or remove preinstalled apps';
   const adb = $('#adb-status');
   adb.hidden = state.adb.ok;
   adb.textContent = 'ADB unavailable';
@@ -336,6 +342,11 @@ async function init() {
     if (!deviceReady()) return;
     deviceInfo ??= new DeviceInfoDialog();
     deviceInfo.open(currentDevice());
+  });
+  $('#btn-apps').addEventListener('click', () => {
+    if (!deviceReady()) return;
+    appsDialog ??= new AppsDialog();
+    appsDialog.open(currentDevice());
   });
   $('#btn-wireless').addEventListener('click', () => wireless.open(deviceReady() && currentDevice().connection === 'usb' ? 'usb' : 'qr'));
   $('#btn-settings').addEventListener('click', async () => {
