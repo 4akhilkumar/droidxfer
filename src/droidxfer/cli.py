@@ -336,5 +336,181 @@ async def mdns() -> None:
         await ctx.stop()
 
 
+# apps: remove preinstalled apps ----------------------------------------------------
+apps_app = typer.Typer(help="Disable, uninstall (for your user) or restore preinstalled apps. Needs USB debugging.",
+                       no_args_is_help=True)
+app.add_typer(apps_app, name="apps")
+_RATING_LABEL = {"safe": "[green]safe[/green]", "probably_safe": "[cyan]probably safe[/cyan]",
+                 "advanced": "[yellow]advanced[/yellow]", "unsafe": "[red]don't remove[/red]", "unknown": "[dim]unknown[/dim]"}
+ExpertOpt = Annotated[bool, typer.Option("--expert", help="Allow apps rated \"don't remove\" (core parts stay protected).")]
+DryRunOpt = Annotated[bool, typer.Option("--dry-run", "-n", help="Show what would change without changing anything.")]
+
+
+def _print_steps(steps: list[dict]) -> int:
+    todo = 0
+    for s in steps:
+        if s["skip"]:
+            console.print(f"  [dim]skip[/dim] {s['package']}: {s['skip']}")
+        else:
+            todo += 1
+            console.print(f"  [bold]{s['action']}[/bold] {s['package']}  [dim]{' && '.join(s['commands'])}[/dim]")
+            if s.get("warning"):
+                console.print(f"    [yellow]! {s['warning']}[/yellow]")
+    return todo
+
+
+def _print_results(results: list[dict]) -> None:
+    failed = 0
+    for r in results:
+        if r["ok"] is None:
+            console.print(f"  [dim]skip[/dim] {r['package']}: {r['message']}")
+        elif r["ok"]:
+            console.print(f"  [green]ok[/green]   {r['package']} ({r['action']})")
+        else:
+            failed += 1
+            console.print(f"  [red]fail[/red] {r['package']}: {r['message']}")
+    if failed:
+        raise typer.Exit(1)
+
+
+async def _apps_action(action: str, packages: list[str], device, expert: bool, dry_run: bool) -> None:
+    ctx = await _context()
+    try:
+        device_id = _pick_device(ctx, device)
+        if dry_run:
+            _print_steps(await ctx.apps.plan(device_id, action, packages, expert=expert))
+            console.print("[dim]Dry run: nothing was changed.[/dim]")
+        else:
+            _print_results(await ctx.apps.apply(device_id, action, packages, expert=expert))
+    finally:
+        await ctx.stop()
+
+
+@apps_app.command("list")
+@run_async
+async def apps_list(
+    device: DeviceOpt = None,
+    all_apps: Annotated[bool, typer.Option("--all", help="Include apps you installed yourself.")] = False,
+    rating: Annotated[str | None, typer.Option(help="safe | probably_safe | advanced | unsafe | unknown")] = None,
+    state: Annotated[str | None, typer.Option(help="enabled | disabled | uninstalled")] = None,
+    search: Annotated[str | None, typer.Option("--search", "-s", help="Filter by package or name.")] = None,
+) -> None:
+    """List apps with their safety rating and state."""
+    ctx = await _context()
+    try:
+        listing = await ctx.apps.list(_pick_device(ctx, device))
+    finally:
+        await ctx.stop()
+    rows = [a for a in listing["apps"] if (all_apps or a["system"] or a["preloaded_by"])
+            and (not rating or a["rating"] == rating) and (not state or a["state"] == state)
+            and (not search or search.lower() in a["package"].lower() or search.lower() in (a["name"] or "").lower())]
+    table = Table("package", "name", "rating", "state", "note")
+    for a in rows:
+        if a["in_use"]:
+            note = f"your {a['in_use']}"
+        elif a["core"]:
+            note = "protected"
+        elif a["preloaded_by"]:
+            note = f"preloaded by {a['preloaded_by']}"
+        else:
+            note = "" if a["system"] else "installed by you"
+        table.add_row(a["package"], a["name"] or "", _RATING_LABEL.get(a["rating"], a["rating"]), a["state"], note)
+    console.print(table)
+    status = listing["catalog"]
+    community = f"{status['community_count']} community" if status["community_fetched_at"] else "community list not downloaded (droidxfer apps fetch-ratings)"
+    console.print(f"[dim]{len(rows)} apps. Ratings: {status['curated_count']} curated, {community}.[/dim]")
+
+
+@apps_app.command("disable")
+@run_async
+async def apps_disable(packages: Annotated[list[str], typer.Argument(help="Package names")],
+                       device: DeviceOpt = None, expert: ExpertOpt = False, dry_run: DryRunOpt = False) -> None:
+    """Disable apps (fully reversible with `apps restore`)."""
+    await _apps_action("disable", packages, device, expert, dry_run)
+
+
+@apps_app.command("uninstall")
+@run_async
+async def apps_uninstall(packages: Annotated[list[str], typer.Argument(help="Package names")],
+                         device: DeviceOpt = None, expert: ExpertOpt = False, dry_run: DryRunOpt = False) -> None:
+    """Uninstall apps for your user (preinstalled apps can be restored; their data can't)."""
+    await _apps_action("uninstall", packages, device, expert, dry_run)
+
+
+@apps_app.command("restore")
+@run_async
+async def apps_restore(packages: Annotated[list[str] | None, typer.Argument(help="Package names")] = None,
+                       device: DeviceOpt = None,
+                       all_changes: Annotated[bool, typer.Option("--all", help="Undo every change droidxfer made.")] = False,
+                       dry_run: DryRunOpt = False) -> None:
+    """Re-enable or reinstall apps."""
+    if not packages and not all_changes:
+        raise ValueError("give package names or --all")
+    if all_changes:
+        ctx = await _context()
+        try:
+            device_id = _pick_device(ctx, device)
+            if dry_run:
+                listing = await ctx.apps.list(device_id)
+                changed = [a["package"] for a in listing["apps"] if a["changed_by_droidxfer"]]
+                _print_steps(await ctx.apps.plan(device_id, "restore", changed) if changed else [])
+                console.print("[dim]Dry run: nothing was changed.[/dim]")
+            else:
+                _print_results(await ctx.apps.restore_all(device_id))
+        finally:
+            await ctx.stop()
+        return
+    await _apps_action("restore", packages, device, False, dry_run)
+
+
+@apps_app.command("export")
+@run_async
+async def apps_export(path: Annotated[Path, typer.Argument(help="JSON file to write")], device: DeviceOpt = None) -> None:
+    """Save the changes droidxfer made on this phone, to apply them to another phone."""
+    import json
+
+    ctx = await _context()
+    try:
+        doc = await ctx.apps.export(_pick_device(ctx, device))
+    finally:
+        await ctx.stop()
+    path.write_text(json.dumps(doc, indent=2))
+    console.print(f"Saved {len(doc['packages'])} changes to {path}")
+
+
+@apps_app.command("import")
+@run_async
+async def apps_import(path: Annotated[Path, typer.Argument(help="JSON file from `apps export`")],
+                      device: DeviceOpt = None, expert: ExpertOpt = False, dry_run: DryRunOpt = False) -> None:
+    """Apply a saved list of changes (shows the plan first with --dry-run)."""
+    import json
+
+    ctx = await _context()
+    try:
+        device_id = _pick_device(ctx, device)
+        steps = await ctx.apps.import_plan(device_id, json.loads(path.read_text()), expert=expert)
+        if dry_run:
+            _print_steps(steps)
+            console.print("[dim]Dry run: nothing was changed.[/dim]")
+            return
+        for action in ("disable", "uninstall"):
+            todo = [s["package"] for s in steps if s["action"] == action and not s["skip"]]
+            if todo:
+                _print_results(await ctx.apps.apply(device_id, action, todo, expert=expert))
+    finally:
+        await ctx.stop()
+
+
+@apps_app.command("fetch-ratings")
+@run_async
+async def apps_fetch_ratings() -> None:
+    """Download the community (UAD-ng) app ratings list from GitHub."""
+    from .core.appcatalog import UAD_URL, AppCatalog
+
+    console.print(f"Downloading {UAD_URL}")
+    status = await asyncio.to_thread(AppCatalog().fetch_community)
+    console.print(f"Saved {status['community_count']} community ratings.")
+
+
 if __name__ == "__main__":
     app()

@@ -78,6 +78,30 @@ class FakeAdb:
             "serial_number": "BATTSERIAL1",
         }
         self.su_paths: list[str] = []
+        # package manager state: package -> flags
+        self.packages: dict[str, dict] = {
+            "com.google.android.apps.tips": {"system": True, "updated": True},
+            "com.google.android.youtube": {"system": True, "updated": True},
+            "com.google.android.apps.nexuslauncher": {"system": True},
+            "com.android.systemui": {"system": True},
+            "com.google.android.gms": {"system": True, "protected": True},
+            "com.google.android.inputmethod.latin": {"system": True},
+            "com.google.android.apps.messaging": {"system": True},
+            "com.google.android.dialer": {"system": True},
+            "com.facebook.appmanager": {"system": True},
+            "com.example.unrated": {"system": True},
+            "com.example.game": {"system": False},
+            "com.samsung.android.app.tips": {"system": False, "installer": "com.samsung.android.app.omcagent"},
+        }
+        for flags in self.packages.values():
+            flags.setdefault("enabled", True)
+            flags.setdefault("installed", True)
+        self.roles = {
+            "home": "com.google.android.apps.nexuslauncher",
+            "sms": "com.google.android.apps.messaging",
+            "dialer": "com.google.android.dialer",
+            "ime": "com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME",
+        }
         self.selinux = "Enforcing"
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
@@ -190,7 +214,56 @@ class FakeAdb:
         ]
         return ("\n".join(f"@@{name}\n{body}" for name, body in parts) + "\n@@end\n").encode()
 
+    def _apps_output(self) -> bytes:
+        def line(pkg: str, flags: dict, detailed: bool) -> str:
+            if not detailed:
+                return f"package:{pkg}"
+            where = f"/data/app/~~x==/{pkg}-y==/base.apk" if flags.get("updated") or not flags["system"] else f"/system/app/{pkg}/{pkg}.apk"
+            return f"package:{where}={pkg} versionCode:1 uid:10{len(pkg)}"
+        pk = self.packages
+        parts = [
+            ("all", [line(p, f, True) for p, f in pk.items() if f["installed"] or f["system"]]),
+            ("installed", [line(p, f, False) for p, f in pk.items() if f["installed"]]),
+            ("system", [line(p, f, False) for p, f in pk.items() if f["system"]]),
+            ("disabled", [line(p, f, False) for p, f in pk.items() if f["installed"] and not f["enabled"]]),
+            ("installers", [f"package:{p}  installer={f.get('installer', 'com.android.vending')}"
+                            for p, f in pk.items() if f["installed"] and not f["system"]]),
+            ("home", [self.roles["home"]]), ("sms", [self.roles["sms"]]), ("dialer", [self.roles["dialer"]]),
+            ("ime", [self.roles["ime"]]),
+        ]
+        return ("\n".join(f"@@{name}\n" + "\n".join(lines) for name, lines in parts) + "\n@@end\n").encode()
+
+    def _pm(self, toks: list[str]) -> tuple[bytes, int]:
+        verb, pkg = toks[1] if toks[0] == "pm" else toks[2], toks[-1]
+        flags = self.packages.get(pkg)
+        if flags is None:
+            return f"Error: Unknown package: {pkg}\n".encode(), 1
+        if verb in ("disable-user", "enable", "uninstall") and flags.get("protected"):
+            return (f"Exception occurred while executing '{verb}':\njava.lang.SecurityException: Shell cannot change "
+                    f"component state for {pkg}\n").encode(), 255
+        if verb == "disable-user":
+            flags["enabled"] = False
+            return f"Package {pkg} new state: disabled-user\n".encode(), 0
+        if verb == "enable":
+            flags["enabled"] = True
+            return f"Package {pkg} new state: enabled\n".encode(), 0
+        if verb == "uninstall":
+            flags["installed"] = False
+            if not flags["system"]:
+                del self.packages[pkg]  # a user app is gone completely
+            return b"Success\n", 0
+        if verb == "install-existing":
+            if not flags["system"]:
+                return f"Package {pkg} doesn't exist\n".encode(), 1
+            flags["installed"] = True
+            return f"Package {pkg} installed for user: 0\n".encode(), 0
+        return f"Unknown command: {verb}\n".encode(), 1
+
     def _run_shell(self, command: str) -> tuple[bytes, int]:
+        if command.startswith("echo @@all"):
+            return self._apps_output(), 0
+        if command.startswith(("pm ", "cmd package ")):
+            return self._pm(shlex.split(command))
         if command.startswith("echo @@props"):
             return self._info_output(), 0
         if command.startswith("getprop"):

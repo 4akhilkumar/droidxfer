@@ -10,6 +10,8 @@ from ..adb.protocol import DEFAULT_HOST, DEFAULT_PORT
 from .config import ConfigStore, cache_dir
 from .devices import DeviceManager
 from .events import EventBus
+from .appcatalog import AppCatalog
+from .apps import AppManager
 from .localfs import VOLUMES, LocalFS
 from .mtpdevices import MtpManager
 from .remotefs import RemoteFS
@@ -42,6 +44,8 @@ class AppContext:
         self.engine = TransferEngine(self.devices, self.remote, self.local, self.bus, self.config)
         self.wireless = WirelessManager(self.client, self.devices, self.config, self.bus)
         self.thumbs = ThumbnailService(self.local, self.remote, self.devices)
+        self.catalog = AppCatalog()
+        self.apps = AppManager(self.remote, self.devices, self.catalog)
         self.uploads_dir = cache_dir() / "uploads"
 
     async def start(self, *, track: bool = True) -> None:

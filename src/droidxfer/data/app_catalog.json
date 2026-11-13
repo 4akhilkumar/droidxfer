@@ -1,0 +1,1302 @@
+{
+ "format": "droidxfer-app-catalog/1",
+ "notes": "Curated by droidxfer. Ratings are deliberately conservative. safe: removing it only removes that app; probably_safe: you lose the feature described; advanced: other apps or core features depend on it; unsafe: can break the phone. Patterns apply only to packages that neither droidxfer's list nor the community list rates.",
+ "packages": {
+  "android": {
+   "name": "Android system",
+   "rating": "unsafe",
+   "maker": "aosp",
+   "description": "The core of Android itself."
+  },
+  "com.android.systemui": {
+   "name": "System UI",
+   "rating": "unsafe",
+   "maker": "aosp",
+   "description": "Status bar, notifications, quick settings and navigation. Removing it makes the phone unusable."
+  },
+  "com.android.settings": {
+   "name": "Settings",
+   "rating": "unsafe",
+   "maker": "aosp",
+   "description": "The Settings app. Needed to manage the phone."
+  },
+  "com.android.shell": {
+   "name": "Shell",
+   "rating": "unsafe",
+   "maker": "aosp",
+   "description": "Runs adb commands. Removing it would cut off adb and droidxfer."
+  },
+  "com.android.providers.settings": {
+   "name": "Settings storage",
+   "rating": "unsafe",
+   "maker": "aosp",
+   "description": "Stores all system settings."
+  },
+  "com.android.phone": {
+   "name": "Phone services",
+   "rating": "unsafe",
+   "maker": "aosp",
+   "description": "Mobile network, calls and SIM handling."
+  },
+  "com.android.server.telecom": {
+   "name": "Call management",
+   "rating": "unsafe",
+   "maker": "aosp",
+   "description": "Routes phone calls."
+  },
+  "com.android.permissioncontroller": {
+   "name": "Permission controller",
+   "rating": "unsafe",
+   "maker": "aosp",
+   "description": "Shows and manages app permissions."
+  },
+  "com.google.android.permissioncontroller": {
+   "name": "Permission controller",
+   "rating": "unsafe",
+   "maker": "google",
+   "description": "Shows and manages app permissions."
+  },
+  "com.android.packageinstaller": {
+   "name": "Package installer",
+   "rating": "unsafe",
+   "maker": "aosp",
+   "description": "Installs and uninstalls apps."
+  },
+  "com.google.android.packageinstaller": {
+   "name": "Package installer",
+   "rating": "unsafe",
+   "maker": "google",
+   "description": "Installs and uninstalls apps."
+  },
+  "com.android.providers.contacts": {
+   "name": "Contacts storage",
+   "rating": "unsafe",
+   "maker": "aosp",
+   "description": "Stores contacts and call history."
+  },
+  "com.android.providers.telephony": {
+   "name": "Phone and messaging storage",
+   "rating": "unsafe",
+   "maker": "aosp",
+   "description": "Stores SMS/MMS and carrier settings."
+  },
+  "com.android.providers.media": {
+   "name": "Media storage",
+   "rating": "unsafe",
+   "maker": "aosp",
+   "description": "Indexes photos, videos and music for all apps."
+  },
+  "com.android.providers.media.module": {
+   "name": "Media storage",
+   "rating": "unsafe",
+   "maker": "aosp",
+   "description": "Indexes photos, videos and music for all apps."
+  },
+  "com.google.android.providers.media.module": {
+   "name": "Media storage",
+   "rating": "unsafe",
+   "maker": "google",
+   "description": "Indexes photos, videos and music for all apps (also used by MTP)."
+  },
+  "com.android.externalstorage": {
+   "name": "External storage",
+   "rating": "unsafe",
+   "maker": "aosp",
+   "description": "Gives apps access to shared storage."
+  },
+  "com.android.keychain": {
+   "name": "Key chain",
+   "rating": "unsafe",
+   "maker": "aosp",
+   "description": "Stores certificates used for Wi-Fi, VPN and secure websites."
+  },
+  "com.android.location.fused": {
+   "name": "Fused location",
+   "rating": "unsafe",
+   "maker": "aosp",
+   "description": "Provides location to apps."
+  },
+  "com.android.inputdevices": {
+   "name": "Input devices",
+   "rating": "unsafe",
+   "maker": "aosp",
+   "description": "Keyboard layouts for physical keyboards and input handling."
+  },
+  "com.android.bluetooth": {
+   "name": "Bluetooth",
+   "rating": "unsafe",
+   "maker": "aosp",
+   "description": "Bluetooth stack."
+  },
+  "com.google.android.bluetooth": {
+   "name": "Bluetooth",
+   "rating": "unsafe",
+   "maker": "google",
+   "description": "Bluetooth stack."
+  },
+  "com.google.android.webview": {
+   "name": "Android System WebView",
+   "rating": "unsafe",
+   "maker": "google",
+   "description": "Shows web pages inside apps. Many apps break without it."
+  },
+  "com.android.webview": {
+   "name": "Android System WebView",
+   "rating": "unsafe",
+   "maker": "aosp",
+   "description": "Shows web pages inside apps. Many apps break without it."
+  },
+  "com.android.mtp": {
+   "name": "MTP host",
+   "rating": "advanced",
+   "maker": "aosp",
+   "description": "Needed for File transfer (MTP) over USB, including droidxfer's MTP mode."
+  },
+  "com.android.nfc": {
+   "name": "NFC service",
+   "rating": "advanced",
+   "maker": "aosp",
+   "description": "Tap to pay, NFC tags and pairing. Remove only if you never use NFC."
+  },
+  "com.android.providers.downloads": {
+   "name": "Download manager",
+   "rating": "advanced",
+   "maker": "aosp",
+   "description": "Downloads for the browser, Play Store and many apps."
+  },
+  "com.android.providers.downloads.ui": {
+   "name": "Downloads",
+   "rating": "probably_safe",
+   "maker": "aosp",
+   "description": "The Downloads list app. Downloads still work without it."
+  },
+  "com.android.providers.calendar": {
+   "name": "Calendar storage",
+   "rating": "advanced",
+   "maker": "aosp",
+   "description": "Stores calendar events for all calendar apps."
+  },
+  "com.android.providers.blockednumber": {
+   "name": "Blocked numbers",
+   "rating": "advanced",
+   "maker": "aosp",
+   "description": "Stores numbers you've blocked."
+  },
+  "com.android.providers.userdictionary": {
+   "name": "User dictionary",
+   "rating": "probably_safe",
+   "maker": "aosp",
+   "description": "Words you've added to the keyboard dictionary."
+  },
+  "com.android.vpndialogs": {
+   "name": "VPN dialogs",
+   "rating": "advanced",
+   "maker": "aosp",
+   "description": "Confirmation screens for VPN apps."
+  },
+  "com.android.backupconfirm": {
+   "name": "Backup confirmation",
+   "rating": "advanced",
+   "maker": "aosp",
+   "description": "Confirms backup and restore operations."
+  },
+  "com.android.cellbroadcastreceiver": {
+   "name": "Wireless emergency alerts",
+   "rating": "advanced",
+   "maker": "aosp",
+   "description": "Government emergency and disaster alerts."
+  },
+  "com.google.android.cellbroadcastreceiver": {
+   "name": "Wireless emergency alerts",
+   "rating": "advanced",
+   "maker": "google",
+   "description": "Government emergency and disaster alerts."
+  },
+  "com.android.emergency": {
+   "name": "Emergency information",
+   "rating": "probably_safe",
+   "maker": "aosp",
+   "description": "Medical info and emergency contacts on the lock screen."
+  },
+  "com.android.stk": {
+   "name": "SIM Toolkit",
+   "rating": "probably_safe",
+   "maker": "aosp",
+   "description": "Menus provided by your SIM card/carrier. Some carriers use it for services."
+  },
+  "com.android.printspooler": {
+   "name": "Print Spooler",
+   "rating": "probably_safe",
+   "maker": "aosp",
+   "description": "Printing from apps."
+  },
+  "com.android.bips": {
+   "name": "Default Print Service",
+   "rating": "safe",
+   "maker": "aosp",
+   "description": "Built-in printing to common printers."
+  },
+  "com.google.android.printservice.recommendation": {
+   "name": "Print Service Recommendation",
+   "rating": "safe",
+   "maker": "google",
+   "description": "Suggests printer plugins."
+  },
+  "com.android.dreams.basic": {
+   "name": "Basic screen saver",
+   "rating": "safe",
+   "maker": "aosp",
+   "description": "The 'colors' screen saver while charging."
+  },
+  "com.android.dreams.phototable": {
+   "name": "Photo screen saver",
+   "rating": "safe",
+   "maker": "aosp",
+   "description": "Photo screen saver while charging."
+  },
+  "com.android.egg": {
+   "name": "Android Easter Egg",
+   "rating": "safe",
+   "maker": "aosp",
+   "description": "The hidden game behind the Android version in Settings."
+  },
+  "com.android.traceur": {
+   "name": "System Tracing",
+   "rating": "safe",
+   "maker": "aosp",
+   "description": "Developer tool for recording performance traces."
+  },
+  "com.android.bookmarkprovider": {
+   "name": "Bookmark provider",
+   "rating": "safe",
+   "maker": "aosp",
+   "description": "Old browser bookmark storage, unused on modern phones."
+  },
+  "com.android.calllogbackup": {
+   "name": "Call log backup",
+   "rating": "probably_safe",
+   "maker": "aosp",
+   "description": "Backs up your call history to your Google account."
+  },
+  "com.android.wallpaperbackup": {
+   "name": "Wallpaper backup",
+   "rating": "probably_safe",
+   "maker": "aosp",
+   "description": "Backs up your wallpaper."
+  },
+  "com.android.wallpaper.livepicker": {
+   "name": "Live wallpaper picker",
+   "rating": "probably_safe",
+   "maker": "aosp",
+   "description": "Choosing live (animated) wallpapers."
+  },
+  "com.android.htmlviewer": {
+   "name": "HTML viewer",
+   "rating": "probably_safe",
+   "maker": "aosp",
+   "description": "Shows licence and legal pages."
+  },
+  "com.android.sharedstoragebackup": {
+   "name": "Shared storage backup",
+   "rating": "probably_safe",
+   "maker": "aosp",
+   "description": "Part of the backup system."
+  },
+  "com.android.documentsui": {
+   "name": "Files (system picker)",
+   "rating": "unsafe",
+   "maker": "aosp",
+   "description": "The system file picker that apps use to open and save files."
+  },
+  "com.google.android.documentsui": {
+   "name": "Files (system picker)",
+   "rating": "unsafe",
+   "maker": "google",
+   "description": "The system file picker that apps use to open and save files."
+  },
+  "com.android.launcher3": {
+   "name": "Launcher",
+   "rating": "advanced",
+   "maker": "aosp",
+   "description": "Home screen. Install and select another launcher before removing."
+  },
+  "com.google.android.gms": {
+   "name": "Google Play services",
+   "rating": "unsafe",
+   "maker": "google",
+   "description": "Google account, notifications, location and most apps depend on it."
+  },
+  "com.google.android.gsf": {
+   "name": "Google Services Framework",
+   "rating": "unsafe",
+   "maker": "google",
+   "description": "Google account sync and push messaging."
+  },
+  "com.google.android.setupwizard": {
+   "name": "Setup wizard",
+   "rating": "unsafe",
+   "maker": "google",
+   "description": "First-boot setup. Removing it can trap the phone in setup after a reset."
+  },
+  "com.android.vending": {
+   "name": "Google Play Store",
+   "rating": "advanced",
+   "maker": "google",
+   "description": "Installing and updating apps. Without it, apps stop updating."
+  },
+  "com.google.android.inputmethod.latin": {
+   "name": "Gboard",
+   "rating": "advanced",
+   "maker": "google",
+   "description": "Google keyboard. Install and select another keyboard first."
+  },
+  "com.google.android.as": {
+   "name": "Android System Intelligence",
+   "rating": "advanced",
+   "maker": "google",
+   "description": "Smart features: Live Caption, Now Playing, smart text selection, app suggestions."
+  },
+  "com.google.android.as.oss": {
+   "name": "Private Compute Services",
+   "rating": "advanced",
+   "maker": "google",
+   "description": "Privacy-preserving support for Android System Intelligence."
+  },
+  "com.google.android.apps.turbo": {
+   "name": "Device Health Services",
+   "rating": "advanced",
+   "maker": "google",
+   "description": "Adaptive battery and battery estimates."
+  },
+  "com.google.android.syncadapters.contacts": {
+   "name": "Google Contacts Sync",
+   "rating": "advanced",
+   "maker": "google",
+   "description": "Syncs contacts with your Google account."
+  },
+  "com.google.android.syncadapters.calendar": {
+   "name": "Google Calendar Sync",
+   "rating": "advanced",
+   "maker": "google",
+   "description": "Syncs calendars with your Google account."
+  },
+  "com.google.android.googlequicksearchbox": {
+   "name": "Google app",
+   "rating": "advanced",
+   "maker": "google",
+   "description": "Search, Discover feed, Google Assistant and the Pixel home screen search bar."
+  },
+  "com.google.android.tts": {
+   "name": "Speech Services by Google",
+   "rating": "probably_safe",
+   "maker": "google",
+   "description": "Text-to-speech and voice typing."
+  },
+  "com.google.android.marvin.talkback": {
+   "name": "Android Accessibility Suite",
+   "rating": "probably_safe",
+   "maker": "google",
+   "description": "TalkBack, Select to Speak and the accessibility menu. Keep it if you use any of them."
+  },
+  "com.google.android.apps.work.clouddpc": {
+   "name": "Android Device Policy",
+   "rating": "probably_safe",
+   "maker": "google",
+   "description": "Needed for a work profile or a company-managed phone."
+  },
+  "com.google.android.partnersetup": {
+   "name": "Google Partner Setup",
+   "rating": "probably_safe",
+   "maker": "google",
+   "description": "Lets preinstalled partner apps use Google services."
+  },
+  "com.google.android.onetimeinitializer": {
+   "name": "One Time Init",
+   "rating": "probably_safe",
+   "maker": "google",
+   "description": "Runs once after setup."
+  },
+  "com.google.android.apps.restore": {
+   "name": "Data Restore Tool",
+   "rating": "probably_safe",
+   "maker": "google",
+   "description": "Restores apps and data from a backup during setup."
+  },
+  "com.google.android.feedback": {
+   "name": "Market Feedback Agent",
+   "rating": "safe",
+   "maker": "google",
+   "description": "Sends crash reports for Play Store apps."
+  },
+  "com.google.android.apps.wellbeing": {
+   "name": "Digital Wellbeing",
+   "rating": "probably_safe",
+   "maker": "google",
+   "description": "Screen time, app timers, bedtime mode and Focus mode."
+  },
+  "com.google.android.apps.wallpaper": {
+   "name": "Wallpaper & style",
+   "rating": "probably_safe",
+   "maker": "google",
+   "description": "Changing wallpaper, colours and themes."
+  },
+  "com.google.android.apps.safetyhub": {
+   "name": "Personal Safety",
+   "rating": "probably_safe",
+   "maker": "google",
+   "description": "Car crash detection, emergency sharing and safety check."
+  },
+  "com.google.android.apps.walletnfcrel": {
+   "name": "Google Wallet",
+   "rating": "probably_safe",
+   "maker": "google",
+   "description": "Tap to pay, boarding passes and cards."
+  },
+  "com.google.android.apps.photos": {
+   "name": "Google Photos",
+   "rating": "probably_safe",
+   "maker": "google",
+   "description": "On Pixel it's also the default gallery. Install another gallery first."
+  },
+  "com.google.android.apps.maps": {
+   "name": "Google Maps",
+   "rating": "probably_safe",
+   "maker": "google",
+   "description": "Maps and navigation. Other apps can still show maps through Play services."
+  },
+  "com.google.android.apps.docs": {
+   "name": "Google Drive",
+   "rating": "probably_safe",
+   "maker": "google",
+   "description": "Cloud files. Phone backups don't need the Drive app."
+  },
+  "com.google.android.calendar": {
+   "name": "Google Calendar",
+   "rating": "probably_safe",
+   "maker": "google",
+   "description": "Calendar app. Events stay in your account."
+  },
+  "com.google.android.contacts": {
+   "name": "Contacts",
+   "rating": "advanced",
+   "maker": "google",
+   "description": "Contacts app. The Phone app uses it for contact details."
+  },
+  "com.google.android.dialer": {
+   "name": "Phone",
+   "rating": "unsafe",
+   "maker": "google",
+   "description": "The phone (calls) app."
+  },
+  "com.google.android.apps.messaging": {
+   "name": "Messages",
+   "rating": "advanced",
+   "maker": "google",
+   "description": "SMS/RCS app. Install and select another messaging app first."
+  },
+  "com.google.android.deskclock": {
+   "name": "Clock",
+   "rating": "advanced",
+   "maker": "google",
+   "description": "Alarms, timers and world clock."
+  },
+  "com.google.android.GoogleCamera": {
+   "name": "Pixel Camera",
+   "rating": "advanced",
+   "maker": "google",
+   "description": "The camera app."
+  },
+  "com.android.chrome": {
+   "name": "Chrome",
+   "rating": "probably_safe",
+   "maker": "google",
+   "description": "Web browser. Install another browser first. (Web pages inside apps use WebView, not Chrome.)"
+  },
+  "com.google.android.apps.tips": {
+   "name": "Pixel Tips",
+   "rating": "safe",
+   "maker": "google",
+   "description": "Tips and tutorials for Pixel features."
+  },
+  "com.google.android.youtube": {
+   "name": "YouTube",
+   "rating": "safe",
+   "maker": "google",
+   "description": "YouTube app. youtube.com still works in a browser."
+  },
+  "com.google.android.apps.youtube.music": {
+   "name": "YouTube Music",
+   "rating": "safe",
+   "maker": "google",
+   "description": "Music streaming app."
+  },
+  "com.google.android.apps.magazines": {
+   "name": "Google News",
+   "rating": "safe",
+   "maker": "google",
+   "description": "News app."
+  },
+  "com.google.android.videos": {
+   "name": "Google TV",
+   "rating": "safe",
+   "maker": "google",
+   "description": "Movies and TV store."
+  },
+  "com.google.android.apps.podcasts": {
+   "name": "Google Podcasts",
+   "rating": "safe",
+   "maker": "google",
+   "description": "Podcast app (discontinued by Google)."
+  },
+  "com.google.android.apps.subscriptions.red": {
+   "name": "Google One",
+   "rating": "safe",
+   "maker": "google",
+   "description": "Storage plan management. Backup itself doesn't need this app."
+  },
+  "com.google.android.apps.fitness": {
+   "name": "Google Fit",
+   "rating": "safe",
+   "maker": "google",
+   "description": "Fitness tracking."
+  },
+  "com.google.android.apps.recorder": {
+   "name": "Recorder",
+   "rating": "safe",
+   "maker": "google",
+   "description": "Pixel voice recorder with transcription."
+  },
+  "com.google.android.apps.chromecast.app": {
+   "name": "Google Home",
+   "rating": "safe",
+   "maker": "google",
+   "description": "Sets up Chromecast and smart home devices."
+  },
+  "com.google.android.gm": {
+   "name": "Gmail",
+   "rating": "safe",
+   "maker": "google",
+   "description": "Email app. Mail stays in your account."
+  },
+  "com.google.android.keep": {
+   "name": "Google Keep",
+   "rating": "safe",
+   "maker": "google",
+   "description": "Notes app. Notes stay in your account."
+  },
+  "com.google.android.calculator": {
+   "name": "Calculator",
+   "rating": "safe",
+   "maker": "google",
+   "description": "Calculator app."
+  },
+  "com.google.android.apps.docs.editors.docs": {
+   "name": "Google Docs",
+   "rating": "safe",
+   "maker": "google",
+   "description": "Documents editor."
+  },
+  "com.google.android.apps.docs.editors.sheets": {
+   "name": "Google Sheets",
+   "rating": "safe",
+   "maker": "google",
+   "description": "Spreadsheet editor."
+  },
+  "com.google.android.apps.docs.editors.slides": {
+   "name": "Google Slides",
+   "rating": "safe",
+   "maker": "google",
+   "description": "Presentation editor."
+  },
+  "com.google.android.apps.tachyon": {
+   "name": "Google Meet",
+   "rating": "safe",
+   "maker": "google",
+   "description": "Video calls (formerly Duo)."
+  },
+  "com.google.android.apps.bard": {
+   "name": "Gemini",
+   "rating": "safe",
+   "maker": "google",
+   "description": "Gemini AI assistant app."
+  },
+  "com.google.android.apps.translate": {
+   "name": "Google Translate",
+   "rating": "safe",
+   "maker": "google",
+   "description": "Translation app."
+  },
+  "com.google.ar.core": {
+   "name": "Google Play Services for AR",
+   "rating": "safe",
+   "maker": "google",
+   "description": "Augmented reality for apps that use ARCore."
+  },
+  "com.google.vr.vrcore": {
+   "name": "Google VR Services",
+   "rating": "safe",
+   "maker": "google",
+   "description": "Virtual reality support (Daydream, discontinued)."
+  },
+  "com.google.android.projection.gearhead": {
+   "name": "Android Auto",
+   "rating": "safe",
+   "maker": "google",
+   "description": "Car integration. Keep it if you use Android Auto."
+  },
+  "com.google.android.apps.dreamliner": {
+   "name": "Pixel Stand",
+   "rating": "safe",
+   "maker": "google",
+   "description": "Features for the Pixel Stand wireless charger."
+  },
+  "com.google.android.apps.nbu.files": {
+   "name": "Files by Google",
+   "rating": "safe",
+   "maker": "google",
+   "description": "File manager and cleanup app. The system file picker is separate."
+  },
+  "com.google.android.apps.wearables.maestro.companion": {
+   "name": "Pixel Buds",
+   "rating": "safe",
+   "maker": "google",
+   "description": "Settings for Pixel Buds earbuds."
+  },
+  "com.google.android.apps.accessibility.voiceaccess": {
+   "name": "Voice Access",
+   "rating": "safe",
+   "maker": "google",
+   "description": "Control the phone by voice."
+  },
+  "com.google.audio.hearing.visualization.accessibility.scribe": {
+   "name": "Live Transcribe & Sound Notifications",
+   "rating": "safe",
+   "maker": "google",
+   "description": "Speech-to-text and sound alerts for hearing accessibility."
+  },
+  "com.google.android.apps.googleassistant": {
+   "name": "Google Assistant (shortcut)",
+   "rating": "probably_safe",
+   "maker": "google",
+   "description": "Assistant launcher icon. Assistant itself lives in the Google app."
+  },
+  "com.google.android.apps.nexuslauncher": {
+   "name": "Pixel Launcher",
+   "rating": "advanced",
+   "maker": "google",
+   "description": "Pixel home screen and recent apps. Install and select another launcher first."
+  },
+  "com.sec.android.app.launcher": {
+   "name": "One UI Home",
+   "rating": "unsafe",
+   "maker": "samsung",
+   "description": "Samsung home screen; gestures and recent apps depend on it."
+  },
+  "com.sec.android.app.SecSetupWizard": {
+   "name": "Samsung setup wizard",
+   "rating": "unsafe",
+   "maker": "samsung",
+   "description": "First-boot setup."
+  },
+  "com.samsung.android.kgclient": {
+   "name": "Knox Guard",
+   "rating": "unsafe",
+   "maker": "samsung",
+   "description": "Device financing/lock service. Removing it has been reported to lock phones."
+  },
+  "com.samsung.android.dialer": {
+   "name": "Phone",
+   "rating": "unsafe",
+   "maker": "samsung",
+   "description": "The phone (calls) app."
+  },
+  "com.samsung.android.messaging": {
+   "name": "Samsung Messages",
+   "rating": "advanced",
+   "maker": "samsung",
+   "description": "SMS/RCS app. Install and select another messaging app first."
+  },
+  "com.samsung.android.app.contacts": {
+   "name": "Samsung Contacts",
+   "rating": "advanced",
+   "maker": "samsung",
+   "description": "Contacts app used by the Phone app."
+  },
+  "com.sec.android.app.camera": {
+   "name": "Camera",
+   "rating": "advanced",
+   "maker": "samsung",
+   "description": "The camera app."
+  },
+  "com.sec.android.gallery3d": {
+   "name": "Gallery",
+   "rating": "advanced",
+   "maker": "samsung",
+   "description": "Photos and videos; other Samsung apps open images through it."
+  },
+  "com.sec.android.app.clockpackage": {
+   "name": "Clock",
+   "rating": "advanced",
+   "maker": "samsung",
+   "description": "Alarms, timers and world clock."
+  },
+  "com.samsung.android.honeyboard": {
+   "name": "Samsung Keyboard",
+   "rating": "advanced",
+   "maker": "samsung",
+   "description": "Samsung keyboard. Install and select another keyboard first."
+  },
+  "com.osp.app.signin": {
+   "name": "Samsung account",
+   "rating": "advanced",
+   "maker": "samsung",
+   "description": "Samsung account; needed by Find My Mobile, Samsung Cloud, Galaxy Store and more."
+  },
+  "com.samsung.android.mobileservice": {
+   "name": "Samsung Experience Service",
+   "rating": "advanced",
+   "maker": "samsung",
+   "description": "Shared services for Samsung account features."
+  },
+  "com.samsung.android.authfw": {
+   "name": "Samsung authentication framework",
+   "rating": "advanced",
+   "maker": "samsung",
+   "description": "Biometric sign-in for Samsung Pass and Wallet."
+  },
+  "com.samsung.android.lool": {
+   "name": "Device care",
+   "rating": "advanced",
+   "maker": "samsung",
+   "description": "Battery, storage and memory management screens."
+  },
+  "com.samsung.android.knox.containercore": {
+   "name": "Knox container core",
+   "rating": "advanced",
+   "maker": "samsung",
+   "description": "Required by Secure Folder and work profiles."
+  },
+  "com.samsung.knox.securefolder": {
+   "name": "Secure Folder",
+   "rating": "advanced",
+   "maker": "samsung",
+   "description": "Private encrypted space. Files inside it become unreachable if removed."
+  },
+  "com.samsung.android.service.aircommand": {
+   "name": "Air command",
+   "rating": "advanced",
+   "maker": "samsung",
+   "description": "S Pen menu and features."
+  },
+  "com.samsung.android.fmm": {
+   "name": "Find My Mobile",
+   "rating": "probably_safe",
+   "maker": "samsung",
+   "description": "Locate, lock or wipe a lost phone. Keep it for theft protection."
+  },
+  "com.samsung.android.scloud": {
+   "name": "Samsung Cloud",
+   "rating": "probably_safe",
+   "maker": "samsung",
+   "description": "Backup and sync with Samsung Cloud."
+  },
+  "com.samsung.android.spay": {
+   "name": "Samsung Wallet",
+   "rating": "probably_safe",
+   "maker": "samsung",
+   "description": "Tap to pay, cards and passes."
+  },
+  "com.samsung.android.samsungpass": {
+   "name": "Samsung Pass",
+   "rating": "probably_safe",
+   "maker": "samsung",
+   "description": "Password and sign-in manager."
+  },
+  "com.sec.android.app.samsungapps": {
+   "name": "Galaxy Store",
+   "rating": "probably_safe",
+   "maker": "samsung",
+   "description": "Updates many Samsung apps. Without it they stop updating."
+  },
+  "com.samsung.android.themestore": {
+   "name": "Galaxy Themes",
+   "rating": "probably_safe",
+   "maker": "samsung",
+   "description": "Themes, icons and wallpapers store."
+  },
+  "com.samsung.android.app.sharelive": {
+   "name": "Quick Share",
+   "rating": "probably_safe",
+   "maker": "samsung",
+   "description": "Sharing files with nearby devices."
+  },
+  "com.samsung.android.calendar": {
+   "name": "Samsung Calendar",
+   "rating": "probably_safe",
+   "maker": "samsung",
+   "description": "Calendar app."
+  },
+  "com.sec.android.app.myfiles": {
+   "name": "My Files",
+   "rating": "probably_safe",
+   "maker": "samsung",
+   "description": "Samsung file manager. Some apps open folders through it."
+  },
+  "com.samsung.android.forest": {
+   "name": "Digital Wellbeing",
+   "rating": "probably_safe",
+   "maker": "samsung",
+   "description": "Screen time, app timers and wind down."
+  },
+  "com.samsung.android.app.routines": {
+   "name": "Modes and Routines",
+   "rating": "probably_safe",
+   "maker": "samsung",
+   "description": "Automation and sleep/driving modes."
+  },
+  "com.samsung.android.app.aodservice": {
+   "name": "Always On Display",
+   "rating": "probably_safe",
+   "maker": "samsung",
+   "description": "Clock and notifications on the screen while it's off."
+  },
+  "com.samsung.android.app.smartcapture": {
+   "name": "Smart select",
+   "rating": "probably_safe",
+   "maker": "samsung",
+   "description": "Screenshot toolbar and Smart select."
+  },
+  "com.samsung.android.app.appsedge": {
+   "name": "Apps edge",
+   "rating": "probably_safe",
+   "maker": "samsung",
+   "description": "Edge panel with app shortcuts."
+  },
+  "com.samsung.android.app.taskedge": {
+   "name": "Tasks edge",
+   "rating": "probably_safe",
+   "maker": "samsung",
+   "description": "Edge panel with task shortcuts."
+  },
+  "com.samsung.android.app.cocktailbarservice": {
+   "name": "Edge panels",
+   "rating": "probably_safe",
+   "maker": "samsung",
+   "description": "The edge panel handle and all edge panels."
+  },
+  "com.samsung.android.app.galaxyfinder": {
+   "name": "Finder",
+   "rating": "probably_safe",
+   "maker": "samsung",
+   "description": "Search in the app drawer."
+  },
+  "com.samsung.android.game.gos": {
+   "name": "Game Optimizing Service",
+   "rating": "probably_safe",
+   "maker": "samsung",
+   "description": "Performance and heat management for games."
+  },
+  "com.samsung.android.bixbyvision.framework": {
+   "name": "Bixby Vision framework",
+   "rating": "probably_safe",
+   "maker": "samsung",
+   "description": "Used by the camera for some scene and text features."
+  },
+  "com.samsung.android.bixby.agent": {
+   "name": "Bixby Voice",
+   "rating": "safe",
+   "maker": "samsung",
+   "description": "Bixby voice assistant."
+  },
+  "com.samsung.android.bixby.wakeup": {
+   "name": "Bixby voice wake-up",
+   "rating": "safe",
+   "maker": "samsung",
+   "description": "'Hi Bixby' wake word."
+  },
+  "com.samsung.android.app.spage": {
+   "name": "Samsung Free",
+   "rating": "safe",
+   "maker": "samsung",
+   "description": "News/content feed left of the home screen (formerly Bixby Home)."
+  },
+  "com.samsung.android.visionintelligence": {
+   "name": "Bixby Vision",
+   "rating": "safe",
+   "maker": "samsung",
+   "description": "Visual search from the camera."
+  },
+  "com.samsung.android.game.gamehome": {
+   "name": "Game Launcher",
+   "rating": "safe",
+   "maker": "samsung",
+   "description": "Game library and launcher."
+  },
+  "com.samsung.android.game.gametools": {
+   "name": "Game Booster tools",
+   "rating": "safe",
+   "maker": "samsung",
+   "description": "In-game toolbar."
+  },
+  "com.samsung.android.ardrawing": {
+   "name": "AR Doodle",
+   "rating": "safe",
+   "maker": "samsung",
+   "description": "Augmented-reality drawing in the camera."
+  },
+  "com.samsung.android.aremoji": {
+   "name": "AR Emoji",
+   "rating": "safe",
+   "maker": "samsung",
+   "description": "Animated avatar emojis."
+  },
+  "com.samsung.android.aremojieditor": {
+   "name": "AR Emoji Editor",
+   "rating": "safe",
+   "maker": "samsung",
+   "description": "Editing AR Emoji avatars."
+  },
+  "com.samsung.android.arzone": {
+   "name": "AR Zone",
+   "rating": "safe",
+   "maker": "samsung",
+   "description": "Hub for AR camera features."
+  },
+  "com.samsung.android.app.tips": {
+   "name": "Samsung Tips",
+   "rating": "safe",
+   "maker": "samsung",
+   "description": "Tips and tutorials."
+  },
+  "com.samsung.android.voc": {
+   "name": "Samsung Members",
+   "rating": "safe",
+   "maker": "samsung",
+   "description": "Community, support and diagnostics app."
+  },
+  "com.samsung.android.kidsinstaller": {
+   "name": "Samsung Kids installer",
+   "rating": "safe",
+   "maker": "samsung",
+   "description": "Installs Samsung Kids mode on demand."
+  },
+  "com.samsung.android.app.watchmanagerstub": {
+   "name": "Galaxy Wearable installer",
+   "rating": "safe",
+   "maker": "samsung",
+   "description": "Installs Galaxy Wearable when you pair a watch."
+  },
+  "com.samsung.android.app.watchmanager": {
+   "name": "Galaxy Wearable",
+   "rating": "safe",
+   "maker": "samsung",
+   "description": "Galaxy Watch and Buds companion. Keep it if you use them."
+  },
+  "com.samsung.android.app.reminder": {
+   "name": "Reminder",
+   "rating": "safe",
+   "maker": "samsung",
+   "description": "Samsung reminders app."
+  },
+  "com.samsung.android.app.notes": {
+   "name": "Samsung Notes",
+   "rating": "safe",
+   "maker": "samsung",
+   "description": "Notes app. Back up notes you want to keep first."
+  },
+  "com.sec.android.app.sbrowser": {
+   "name": "Samsung Internet",
+   "rating": "safe",
+   "maker": "samsung",
+   "description": "Samsung's web browser."
+  },
+  "com.samsung.android.email.provider": {
+   "name": "Samsung Email",
+   "rating": "safe",
+   "maker": "samsung",
+   "description": "Email app."
+  },
+  "com.samsung.android.tvplus": {
+   "name": "Samsung TV Plus",
+   "rating": "safe",
+   "maker": "samsung",
+   "description": "Free streaming TV channels."
+  },
+  "com.samsung.android.stickercenter": {
+   "name": "Sticker center",
+   "rating": "safe",
+   "maker": "samsung",
+   "description": "Stickers for the keyboard and messages."
+  },
+  "com.samsung.android.da.daagent": {
+   "name": "Dual Messenger",
+   "rating": "safe",
+   "maker": "samsung",
+   "description": "Runs two copies of messaging apps."
+  },
+  "com.sec.android.easyMover": {
+   "name": "Smart Switch",
+   "rating": "safe",
+   "maker": "samsung",
+   "description": "Transfers data from an old phone."
+  },
+  "com.samsung.android.smartswitchassistant": {
+   "name": "Smart Switch assistant",
+   "rating": "safe",
+   "maker": "samsung",
+   "description": "Helper for Smart Switch."
+  },
+  "com.samsung.android.service.peoplestripe": {
+   "name": "People edge",
+   "rating": "safe",
+   "maker": "samsung",
+   "description": "Edge panel with favourite contacts."
+  },
+  "com.samsung.android.dynamiclock": {
+   "name": "Dynamic Lock Screen",
+   "rating": "safe",
+   "maker": "samsung",
+   "description": "Changing lock screen wallpapers."
+  },
+  "com.samsung.android.smartmirroring": {
+   "name": "Smart View",
+   "rating": "safe",
+   "maker": "samsung",
+   "description": "Screen mirroring to TVs."
+  },
+  "com.samsung.android.svoiceime": {
+   "name": "Samsung voice input",
+   "rating": "safe",
+   "maker": "samsung",
+   "description": "Voice typing for the Samsung keyboard."
+  },
+  "com.samsung.android.oneconnect": {
+   "name": "SmartThings",
+   "rating": "safe",
+   "maker": "samsung",
+   "description": "Smart home and connected devices."
+  },
+  "com.samsung.android.privateshare": {
+   "name": "Private Share",
+   "rating": "safe",
+   "maker": "samsung",
+   "description": "Sharing files with expiry and access control."
+  },
+  "com.samsung.android.coldwalletservice": {
+   "name": "Blockchain Keystore",
+   "rating": "safe",
+   "maker": "samsung",
+   "description": "Crypto wallet key storage."
+  },
+  "com.sec.android.app.shealth": {
+   "name": "Samsung Health",
+   "rating": "safe",
+   "maker": "samsung",
+   "description": "Health and fitness app. Keep it if you use a Galaxy Watch."
+  },
+  "com.samsung.android.rubin.app": {
+   "name": "Customization Service",
+   "rating": "safe",
+   "maker": "samsung",
+   "description": "Personalised suggestions based on usage."
+  },
+  "com.samsung.android.app.readingglass": {
+   "name": "Magnifier",
+   "rating": "safe",
+   "maker": "samsung",
+   "description": "Uses the camera as a magnifier."
+  },
+  "com.samsung.android.video": {
+   "name": "Samsung Video Player",
+   "rating": "safe",
+   "maker": "samsung",
+   "description": "Video player."
+  },
+  "com.sec.android.app.popupcalculator": {
+   "name": "Calculator",
+   "rating": "safe",
+   "maker": "samsung",
+   "description": "Calculator app."
+  },
+  "com.samsung.android.app.interpreter": {
+   "name": "Interpreter",
+   "rating": "safe",
+   "maker": "samsung",
+   "description": "Live conversation translation (Galaxy AI)."
+  },
+  "com.sec.android.app.chromecustomizations": {
+   "name": "Chrome customizations",
+   "rating": "safe",
+   "maker": "samsung",
+   "description": "Samsung bookmarks for Chrome."
+  },
+  "com.facebook.appmanager": {
+   "name": "Facebook App Manager",
+   "rating": "safe",
+   "maker": "other",
+   "description": "Updates preinstalled Facebook apps in the background."
+  },
+  "com.facebook.services": {
+   "name": "Facebook Services",
+   "rating": "safe",
+   "maker": "other",
+   "description": "Background services for preinstalled Facebook apps."
+  },
+  "com.facebook.system": {
+   "name": "Facebook App Installer",
+   "rating": "safe",
+   "maker": "other",
+   "description": "Installs Facebook apps."
+  },
+  "com.facebook.katana": {
+   "name": "Facebook",
+   "rating": "safe",
+   "maker": "other",
+   "description": "Facebook app."
+  },
+  "com.microsoft.skydrive": {
+   "name": "OneDrive",
+   "rating": "safe",
+   "maker": "other",
+   "description": "Microsoft cloud storage."
+  },
+  "com.microsoft.office.officehubrow": {
+   "name": "Microsoft 365",
+   "rating": "safe",
+   "maker": "other",
+   "description": "Microsoft Office apps."
+  },
+  "com.linkedin.android": {
+   "name": "LinkedIn",
+   "rating": "safe",
+   "maker": "other",
+   "description": "LinkedIn app."
+  },
+  "com.netflix.partner.activation": {
+   "name": "Netflix activation",
+   "rating": "safe",
+   "maker": "other",
+   "description": "Partner activation for preinstalled Netflix."
+  },
+  "com.netflix.mediaclient": {
+   "name": "Netflix",
+   "rating": "safe",
+   "maker": "other",
+   "description": "Netflix app."
+  },
+  "com.spotify.music": {
+   "name": "Spotify",
+   "rating": "safe",
+   "maker": "other",
+   "description": "Spotify app."
+  },
+  "com.android.virtualization.terminal": {
+   "name": "Linux terminal",
+   "rating": "safe",
+   "maker": "aosp",
+   "description": "Runs a Linux environment in a virtual machine (developer feature)."
+  },
+  "com.android.server.telecomui": {
+   "name": "Call management UI",
+   "rating": "unsafe",
+   "maker": "aosp",
+   "description": "Screens used while placing and managing calls."
+  },
+  "com.android.contactspicker": {
+   "name": "Contacts picker",
+   "rating": "advanced",
+   "maker": "aosp",
+   "description": "The system screen apps use to let you pick contacts without full contacts access."
+  },
+  "com.samsung.android.ese": {
+   "name": "Embedded secure element",
+   "rating": "advanced",
+   "maker": "samsung",
+   "description": "Secure chip service used by tap to pay and digital car keys."
+  },
+  "com.samsung.drm": {
+   "name": "Samsung DRM",
+   "rating": "advanced",
+   "maker": "samsung",
+   "description": "Protected media playback; some video and music apps need it."
+  },
+  "com.samsung.android.app.esimkeystring": {
+   "name": "eSIM service",
+   "rating": "advanced",
+   "maker": "samsung",
+   "description": "Part of eSIM setup and management."
+  },
+  "com.sec.android.app.googlelpaoverlay": {
+   "name": "eSIM manager settings",
+   "rating": "advanced",
+   "maker": "samsung",
+   "description": "Samsung configuration for Google's eSIM manager."
+  },
+  "com.samsung.android.simagent": {
+   "name": "SIM agent",
+   "rating": "advanced",
+   "maker": "samsung",
+   "description": "Handles SIM card changes and related prompts."
+  },
+  "com.sec.android.app.RilPhoneNumberService": {
+   "name": "Phone number service",
+   "rating": "advanced",
+   "maker": "samsung",
+   "description": "Provides the SIM's phone number to the system."
+  },
+  "com.samsung.android.aicore": {
+   "name": "Galaxy AI core",
+   "rating": "advanced",
+   "maker": "samsung",
+   "description": "Shared on-device AI engine used by Galaxy AI features."
+  },
+  "com.samsung.android.offline.languagemodel": {
+   "name": "Galaxy AI language models",
+   "rating": "probably_safe",
+   "maker": "samsung",
+   "description": "Offline language data for Galaxy AI translation and Interpreter."
+  },
+  "com.samsung.android.service.airviewdictionary": {
+   "name": "Air view dictionary",
+   "rating": "probably_safe",
+   "maker": "samsung",
+   "description": "Hover the S Pen over a word to see its translation."
+  },
+  "com.samsung.gamedriver.sm8750": {
+   "name": "Game driver",
+   "rating": "advanced",
+   "maker": "samsung",
+   "description": "Updatable graphics driver for games."
+  }
+ },
+ "patterns": [
+  {
+   "prefix": "com.samsung.SMT.lang_",
+   "name": "Samsung text-to-speech voice",
+   "rating": "safe",
+   "maker": "samsung",
+   "description": "Voice data for one language of Samsung's text-to-speech engine."
+  },
+  {
+   "prefix": "com.qualcomm.qti.gpudrivers.",
+   "name": "Graphics driver",
+   "rating": "advanced",
+   "maker": "other",
+   "description": "Updatable graphics driver; games and apps may use it."
+  },
+  {
+   "segment": "resources",
+   "name": "System resources",
+   "rating": "advanced",
+   "maker": "",
+   "description": "Configuration resources for a system component (for example Wi-Fi or UWB). Removing it can break that feature."
+  },
+  {
+   "segment_suffix": "overlay",
+   "name": "System overlay",
+   "rating": "advanced",
+   "maker": "",
+   "description": "Configuration overlay that changes how a system component behaves. Removing it can break that component."
+  }
+ ]
+}

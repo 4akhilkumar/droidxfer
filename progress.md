@@ -112,7 +112,33 @@ tests/        fake_adb.py (in-process fake adb server) + tests
   (0x201E) -> CloseSession + OpenSession; (4) MTP keeps the ObjectInfo modification date on disk (local time).
   96 tests passing (fake MTP device in tests/fake_mtp.py enforces the short-packet rule).
 
+- Session 5 (2026-11-13): app manager ("debloat") on branch feature/app-manager. core/apps.py: one shell round
+  trip lists packages (`pm list packages -f -U --show-versioncode -u`, plus installed/system/disabled sets and the
+  HOME/SMS/DIALER role holders + default IME). Actions: `pm disable-user --user 0` (default), `pm uninstall
+  --user 0`, restore = `cmd package install-existing --user 0` and/or `pm enable --user 0`. Guards: CORE set never
+  touched (incl. com.android.shell = adb), apps in use as home/SMS/dialer/keyboard blocked, "unsafe" needs expert.
+  Phone refusals (SecurityException / DELETE_FAILED_INTERNAL_ERROR) reported as "protected". Undo log per serial in
+  app_dir()/apps/<serial>.json; Restore all, export/import (format droidxfer-apps/1). Ratings: curated
+  src/droidxfer/data/app_catalog.json (198 pkgs, Apache) + optional UAD-ng list (GPL-3.0, downloaded on request to
+  cache_dir()/uad_lists.json, never bundled; Recommended/Advanced/Expert/Unsafe -> safe/probably_safe/advanced/
+  unsafe; curated wins). No shell command returns app labels (no --show-label), so names come from the lists.
+  Live on the Pixel 7 Pro: listing 419 apps, guards (launcher/SMS/dialer/Gboard detected), Pixel Tips disabled then
+  restored via the web UI (user-approved), community list download. Found while testing: `.locked` CSS class
+  clashed with the full-screen "Session expired" overlay -> protected rows covered the screen; renamed is-locked.
+  Samsung S25 Ultra (SM-S938B, One UI on Android 17), read-only + dry runs: 539 apps (505 system); role
+  detection works (One UI Home, Samsung Keyboard, Samsung Phone, Google Messages as SMS); Knox Guard blocked
+  without expert mode. Catalog grew to 211 entries + "patterns" (prefix / whole segment / segment suffix, applied
+  after the community list): Samsung TTS voice packs (com.samsung.SMT.lang_*), *.resources.* and *overlay
+  packages, Qualcomm GPU drivers. Unrated system packages on the S25: 69 -> 31 (new/undocumented services left as
+  Unknown on purpose). Removable preloads: on the S25, 24 of 34 non-system apps were installed by Samsung's
+  com.samsung.android.app.omcagent / updatecenter (e.g. Samsung Tips lives in /data/app) -> `pm list packages -3 -i`
+  marks them preloaded_by="Samsung"; they count as preinstalled in filters and get a "removed completely" warning
+  on uninstall. Live on the S25 (user-approved): Samsung Tips disabled via CLI, confirmed enabled=3, then
+  `apps restore --all` re-enabled it; undo log recorded both. 110 tests passing.
+
 ## Possible next steps / ideas
+- Rate the 31 remaining unknown S25 packages when documented.
+- Read real app names by fetching only the manifest/resources from each APK (no shell command for labels).
 - Option to prefer MTP for transfers even when adb is available (about 5x faster on USB 3).
 - Tune throughput (IO_CHUNK, SYNC_DATA_MAX); check Range/HEIC on a Samsung phone and in Safari.
 - sendrecv_v2 compression; pipelining many small files; stream Finder drops straight to the phone instead of staging.

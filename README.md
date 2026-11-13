@@ -96,10 +96,25 @@ Settings and saved Wi-Fi endpoints are stored in `~/Library/Application Support/
 - **Wi-Fi...** opens the wireless options: QR pairing, pairing code, connect, or "From USB" (`adb tcpip 5555`).
 - If the phone is connected by both USB and Wi-Fi, USB is used. If the cable is unplugged during a transfer, it continues over Wi-Fi.
 
+### Removing preinstalled apps (debloat)
+**Apps** (next to Phone info) lists the phone's apps with a safety rating and lets you **Disable** them (the default; fully reversible) or **Uninstall for user** (removes the app and its data for you; preinstalled apps can be restored). It needs USB debugging and works without root on Pixel, Samsung and other Android phones.
+
+- Nothing is deleted from the system partition, so **Restore** (or a factory reset) brings preinstalled apps back. Their data isn't restored after an uninstall. Apps you installed yourself are removed completely and come back only from the app store.
+- Samsung installs some of its apps outside the system partition during setup (for example Samsung Tips). droidxfer shows them as **preloaded by Samsung** and includes them with preinstalled apps. Disabling them is reversible as usual, but uninstalling removes them completely; reinstall them from Galaxy Store.
+- Ratings: **Safe**, **Probably safe**, **Advanced**, **Don't remove**, or **Unknown**. droidxfer ships its own conservative list (about 200 Google, Samsung and Android packages). **Download community list** fetches the larger [Universal Android Debloater](https://github.com/Universal-Debloater-Alliance/universal-android-debloater-next-generation) list (about 5,400 packages) from GitHub and caches it; droidxfer's own ratings take priority.
+- Safety: "Don't remove" apps can only be changed in **Expert mode**. Core Android parts (System UI, Settings, the adb shell, the package installer...) and the apps you're currently using as home screen, keyboard, SMS or phone app can never be changed. Every change is shown for review first.
+- Every change is logged per phone in `~/Library/Application Support/droidxfer/apps/`. **Restore all** undoes everything droidxfer changed. **Export** saves the changes as a JSON file; **Import** applies it to another phone (with a review first).
+- If the phone misbehaves after a change, use **Restore all** (adb usually still works even if the phone keeps restarting). As a last resort, a factory reset restores every app.
+- Major system updates occasionally re-enable apps (Samsung more often than Google).
+
 ### CLI
 ```bash
 uv run droidxfer devices
 uv run droidxfer info                     # phone details + authenticity checks
+uv run droidxfer apps list --rating safe  # preinstalled apps rated safe to remove
+uv run droidxfer apps disable com.google.android.apps.tips --dry-run
+uv run droidxfer apps restore --all       # undo every change droidxfer made
+uv run droidxfer apps fetch-ratings       # download the community ratings list
 uv run droidxfer ls /sdcard/DCIM/Camera
 uv run droidxfer push ~/Pictures/trip /sdcard/Pictures --conflict rename
 uv run droidxfer pull /sdcard/DCIM/Camera ~/Downloads --verify
