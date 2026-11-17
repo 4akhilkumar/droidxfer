@@ -107,19 +107,31 @@ Settings and saved Wi-Fi endpoints are stored in `~/Library/Application Support/
 - If the phone misbehaves after a change, use **Restore all** (adb usually still works even if the phone keeps restarting). As a last resort, a factory reset restores every app.
 - Major system updates occasionally re-enable apps (Samsung more often than Google).
 
-### Reading the phone's log (troubleshooting)
-**Logs** (next to Apps) shows the phone's system log (logcat), so you can see what happened when something misbehaves. It needs USB debugging and is read-only.
+### Logs
+**Logs** opens one window with two tabs. Both use the same viewer, modelled on the matrix_sols application log viewer (CloudWatch-style):
 
-- **What just happened** reads what the phone has already stored (the last 1–60 minutes, or everything). Reproduce the problem, then open it: no need to start recording first. A busy phone writes hundreds of lines a second, so the phone stores roughly the last 15–30 minutes.
-- **Live** follows new lines as the phone writes them. **Stop** pauses; the newest 5,000 lines stay on screen.
-- Ready-made filters explain common events in plain words (shown as a note next to the line):
-  - **Headphones & media buttons**: what the headphones sent (Play, Pause, or a Play/Pause *toggle*), which app passed it on (e.g. the Google app for headphones with Google Assistant built in), and when playback changed. Useful when taking headphones off pauses at the wrong time.
+- **Filter pattern**: `error timeout` (both terms), `"exact phrase"`, `-exclude`, `?any ?of` (at least one), `/regex/`, plus **Aa** for case-sensitive. Matches are highlighted.
+- **Time range**: quick ranges, **All**, or **Custom** from/to. **Levels**, **log groups** and **log streams** (multi-select with counts and search).
+- **Histogram** of matching entries per time bucket, split by level; click a bar to zoom into it.
+- Newest first with **Load more**, entries that expand (details, full text, **Copy**, **Only this stream**, **±1 min around**), **Wrap lines**, **Expand all**.
+- **Live tail** with Pause/Resume and Clear. **Download** saves the matching entries (newest first, up to 10,000). **Save query** keeps named queries in this browser.
+
+**droidxfer activity** is droidxfer's own log: transfers (queued, started, finished with counts, size and speed, and which files failed), phones connecting and disconnecting, Wi-Fi pairing and connections, app changes, file changes on both sides, settings changes, and errors with tracebacks. Groups are areas of droidxfer (transfer, devices, wireless, apps, api…); streams are source files.
+- The file is `~/Library/Logs/droidxfer/droidxfer.log` (rotated at 5 MB, 3 old files kept). The web server and CLI commands write to it at the same time safely.
+- Line format, same as matrix_sols: `17-Nov-26 20:41:07 [INFO] droidxfer/core/transfer.py:402:_run - message`.
+- Secrets never reach the file: the web session token, Wi-Fi pairing codes and QR passwords are replaced by `******`, and your home folder is shortened to `~`.
+- **Settings › droidxfer's activity log** chooses how much is recorded: Normal (default), Detailed (every step, for troubleshooting), Problems only, or Errors only.
+
+**Phone log** is the phone's system log (logcat). It needs USB debugging and is read-only. Groups are apps/processes; streams are log tags; levels are Verbose to Fatal.
+- A busy phone writes about 30,000 lines a minute and keeps only roughly the last 15–30 minutes, so reproduce the problem first, then search. The time range, level, app, ready-made filter and plain search terms are applied on the phone first, so a search usually takes under a second.
+- Ready-made filters explain common events in plain words (a note on the line):
+  - **Headphones & media buttons**: what the headphones sent (Play, Pause, or a Play/Pause *toggle*), which app passed it on (e.g. the Google app for headphones with Google Assistant built in), and when playback changed.
   - **Bluetooth connections**: connects, disconnects and drops.
   - **App crashes & freezes**: crashes, "isn't responding" (ANR) and native crashes. Routine memory clean-up is left out.
   - **Audio interruptions**: notification sounds, calls, alarms and the Assistant taking over the sound.
-- Narrow further by level (errors only, warnings...), one app (package name, e.g. `org.videolan.vlc`) or search text. Filters run on the phone first, so even a large log loads in a few seconds.
-- **Save…** writes the lines shown to a text file. Logs can contain personal details (device and contact names, account IDs). **Hide device addresses** (on by default) keeps only the last two bytes of Bluetooth and Wi-Fi addresses.
+- **One app** (package name, e.g. `org.videolan.vlc`) includes its earlier runs. **Explained only** shows just the lines with a note. **Hide addresses** (on by default) keeps only the last two bytes of Bluetooth and Wi-Fi addresses.
 - **Clear phone log** empties the phone's log (asks first). This is the only thing that changes anything on the phone.
+- Logs can contain personal details (device and contact names, account IDs), so check a downloaded file before sharing it.
 
 ### CLI
 ```bash
@@ -129,10 +141,12 @@ uv run droidxfer apps list --rating safe  # preinstalled apps rated safe to remo
 uv run droidxfer apps disable com.google.android.apps.tips --dry-run
 uv run droidxfer apps restore --all       # undo every change droidxfer made
 uv run droidxfer apps fetch-ratings       # download the community ratings list
-uv run droidxfer logs -p headphones -m 30 # headphone/media-button events from the last 30 minutes
-uv run droidxfer logs -f -l W             # follow warnings and errors live (Ctrl+C to stop)
-uv run droidxfer logs -a org.videolan.vlc --save vlc.txt
+uv run droidxfer logs -p headphones -r 30m --notes-only   # phone log: headphone/media-button events
+uv run droidxfer logs -f -l W,E,F         # follow the phone's warnings and errors live (Ctrl+C to stop)
+uv run droidxfer logs -q 'bluetooth -debug' -g com.android.bluetooth --save bt.txt
 uv run droidxfer logs --presets           # list the ready-made filters
+uv run droidxfer activity -r 1d -l WARNING,ERROR   # droidxfer's own log: problems in the last day
+uv run droidxfer activity -f              # follow droidxfer's own log live
 uv run droidxfer ls /sdcard/DCIM/Camera
 uv run droidxfer push ~/Pictures/trip /sdcard/Pictures --conflict rename
 uv run droidxfer pull /sdcard/DCIM/Camera ~/Downloads --verify

@@ -16,7 +16,7 @@
       <span id="device-badge" class="badge"></span>
       <button id="btn-info" class="btn small" type="button" title="Phone details and authenticity checks" disabled>Phone info</button>
       <button id="btn-apps" class="btn small" type="button" title="Disable or remove preinstalled apps (needs USB debugging)" disabled>Apps</button>
-      <button id="btn-logs" class="btn small" type="button" title="Read the phone's system log (needs USB debugging)" disabled>Logs</button>
+      <button id="btn-logs" class="btn small" type="button" title="droidxfer's activity log and the phone's system log">Logs</button>
     </div>
     <span id="adb-status" class="badge error" hidden></span>
     <span id="conn-lost" class="badge warn" hidden>Reconnecting&hellip;</span>
@@ -117,6 +117,14 @@
       <label class="check"><input type="checkbox" name="show_hidden"> Show hidden files</label>
       <label class="check"><input type="checkbox" name="mtp"> Use File transfer (MTP) mode over USB, so phones work without USB debugging</label>
       <label class="check"><input type="checkbox" name="external_drives"> Allow external drives (/Volumes) on the Mac side</label>
+      <label class="field"><span>droidxfer's activity log (Logs &rsaquo; droidxfer activity)</span>
+        <select name="log_level">
+          <option value="INFO">Normal: what droidxfer does, and problems</option>
+          <option value="DEBUG">Detailed: also every step (for troubleshooting)</option>
+          <option value="WARNING">Problems only</option>
+          <option value="ERROR">Errors only</option>
+        </select>
+      </label>
       <label class="field"><span>adb path (leave empty to detect automatically)</span><input name="adb_path" spellcheck="false" placeholder="/opt/homebrew/bin/adb"></label>
       <div class="actions">
         <button type="button" class="btn" data-cancel>Cancel</button>

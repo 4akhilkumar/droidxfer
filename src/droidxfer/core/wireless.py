@@ -12,6 +12,7 @@ from dataclasses import dataclass
 
 import segno
 
+from . import applog
 from ..adb import AdbClient, AdbError
 from .config import ConfigStore
 from .devices import DeviceManager
@@ -71,21 +72,29 @@ class WirelessManager:
         host, port = validate_host(host), validate_port(port)
         if not _CODE.match(code or ""):
             raise WirelessError("pairing code must be 4-32 letters/digits")
+        applog.register_secret(code)
+        log.info("Wi-Fi: pairing with %s:%d", host, port)
         msg = (await self.client.pair(host, port, code)).strip()
         if not msg.lower().startswith("successfully paired"):
+            log.warning("Wi-Fi: pairing with %s:%d failed: %s", host, port, msg or "no answer")
             raise WirelessError(msg or "pairing failed")
+        log.info("Wi-Fi: %s", msg)
         return msg
 
     async def connect(self, host: str, port: int) -> str:
         host, port = validate_host(host), validate_port(port)
         msg = (await self.client.connect(host, port)).strip()
         if not (msg.startswith("connected to") or msg.startswith("already connected")):
+            log.warning("Wi-Fi: connecting to %s:%d failed: %s", host, port, msg or "no answer")
             raise WirelessError(msg or "connect failed")
+        log.info("Wi-Fi: %s", msg)
         self.config.remember_endpoint(host, port)
         return msg
 
     async def disconnect(self, serial: str) -> str:
-        return (await self.client.disconnect(serial)).strip()
+        msg = (await self.client.disconnect(serial)).strip()
+        log.info("Wi-Fi: disconnect %s: %s", serial, msg)
+        return msg
 
     async def discover(self) -> list[dict]:
         services = await self.client.mdns_services()
@@ -117,6 +126,7 @@ class WirelessManager:
         if not match:
             raise WirelessError("the phone does not seem to be connected to Wi-Fi (no wlan0 address)")
         ip = match.group(1)
+        log.info("Wi-Fi: switching %s to adb over TCP (%s:%d)", device_id, ip, port)
         await self.client.tcpip(t.serial, port)
         last_error = ""
         for _ in range(10):
@@ -125,6 +135,7 @@ class WirelessManager:
                 return await self.connect(ip, port)
             except (WirelessError, AdbError, asyncio.TimeoutError) as exc:
                 last_error = str(exc)
+        log.warning("Wi-Fi: %s switched to TCP mode but connecting to %s:%d failed: %s", device_id, ip, port, last_error)
         raise WirelessError(f"phone switched to TCP mode but connecting to {ip}:{port} failed: {last_error}")
 
     # QR pairing ----------------------------------------------------------------
@@ -132,6 +143,7 @@ class WirelessManager:
         name = "droidxfer-" + secrets.token_hex(3)
         alphabet = string.ascii_letters + string.digits
         password = "".join(secrets.choice(alphabet) for _ in range(12))
+        applog.register_secret(password)
         payload = f"WIFI:T:ADB;S:{name};P:{password};;"
         svg = segno.make(payload, error="m").svg_inline(scale=6, border=2, dark="#000000", light="#ffffff")
         session = QrSession(name, password)

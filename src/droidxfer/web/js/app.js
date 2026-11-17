@@ -270,10 +270,6 @@ function renderDevices() {
   $('#btn-apps').title = device?.capabilities?.adb === false
     ? 'Removing apps needs USB debugging; this phone is in File transfer (MTP) mode.'
     : 'Disable or remove preinstalled apps';
-  $('#btn-logs').disabled = !deviceReady() || device?.capabilities?.adb === false;
-  $('#btn-logs').title = device?.capabilities?.adb === false
-    ? "Reading logs needs USB debugging; this phone is in File transfer (MTP) mode."
-    : "Read the phone's system log";
   const adb = $('#adb-status');
   adb.hidden = state.adb.ok;
   adb.textContent = 'ADB unavailable';
@@ -355,7 +351,6 @@ async function init() {
     appsDialog.open(currentDevice());
   });
   $('#btn-logs').addEventListener('click', () => {
-    if (!deviceReady()) return;
     logsDialog ??= new LogsDialog();
     logsDialog.open(currentDevice());
   });

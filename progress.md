@@ -150,6 +150,27 @@ tests/        fake_adb.py (in-process fake adb server) + tests
   POST clear (`logcat -c`, confirmed in UI/CLI). Web: Logs dialog (web/js/logs.js); CLI: `droidxfer logs`.
   MAC masking keeps the last 2 bytes, also when glued to text ("F1:26STATE_CONNECTED"). Verified on the S25 in the
   browser (dump, headphones preset notes, live follow + stop) and CLI. 144 tests passing.
+- Session 6, part 2 (2026-11-17): log system ported from matrix_sols (ms_apps/security/log_viewer.py +
+  static/js/application_logs.js + settings.LOGGING). User chose: both droidxfer's own activity log and the phone
+  log in one Logs window (two tabs), all viewer features. core/applog.py: same line format as matrix_sols
+  (`{asctime} [{levelname}] {pathname}:{lineno}:{funcName} - {message}`, %d-%b-%y), relative paths, masking in the
+  formatter (registered secrets: session token, pairing code, QR password; `token=`; home -> ~), file
+  ~/Library/Logs/droidxfer/droidxfer.log (DROIDXFER_HOME -> <home>/logs). Server + CLI processes write at once,
+  so a LockedRotatingFileHandler (flock on droidxfer.log.lock, O_APPEND, rotate under the lock at 5 MB x 3) instead
+  of matrix_sols' WatchedFileHandler + external logrotate. Setting `log_level` (DEBUG/INFO/WARNING/ERROR).
+  Activity logging added: transfers (queued/started/summary/failed files), adb/MTP device changes (DEBUG in CLI
+  runs, which re-list devices every command), Wi-Fi, apps, file ops, settings, API errors (4xx WARNING/INFO, 5xx
+  ERROR, unexpected exceptions with traceback). core/logviewer.py = port of log_viewer.py (FilterPattern,
+  LogQuery, backwards chunked reads, byte-offset cursors, histogram, rotation-aware tail, download, meta);
+  groups = feature (core/<module>), adb, mtp, api, cli, or library. Phone tab reuses LogQuery/FilterPattern/
+  HistogramBuilder: group = process (ps -A -o PID,NAME in the same round trip), stream = tag; result cached
+  (qid) for Load more/Download; "Explained only" is server-side. Perf finding on the S25: toybox `grep -E` with
+  alternation over 15 min (~300k lines) took 14.8 s, `grep -F -e ... -e ...` 0.5 s -> presets carry fixed
+  `terms` for the phone and keep the regex for Python (test checks the terms cover the regex). Custom end is
+  inclusive to the whole second for ms-precision phone lines. Web: web/js/logviewer.js (component) +
+  web/js/logs.js (tabs, adapters); Logs button no longer needs a phone. CLI: `logs` (phone; -r/-l/-q/-g/--tags)
+  and new `activity`. Verified in the browser on the S25 (both tabs: search, histogram, patterns + highlight,
+  expand, live tail both tabs, presets ~0.5 s). 183 tests passing.
 
 ## Possible next steps / ideas
 - Rate the 31 remaining unknown S25 packages when documented.

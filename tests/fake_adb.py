@@ -129,6 +129,9 @@ class FakeAdb:
         self.selinux = "Enforcing"
         self.log_now = 1_700_000_010
         self.logcat_lines: list[str] = list(SAMPLE_LOG)
+        self.processes: dict[int, str] = {
+            7507: "com.android.bluetooth", 2945: "system_server", 12345: "com.example.game",
+        }
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
         self._server: asyncio.base_events.Server | None = None
@@ -230,6 +233,9 @@ class FakeAdb:
         w.write(_SHELL_HDR.pack(3, 1) + bytes([code]))
         await w.drain()
 
+    def _ps(self) -> bytes:
+        return "".join(f"{pid:>5} {name}\n" for pid, name in [("PID", "NAME"), *self.processes.items()]).encode()
+
     def _info_output(self) -> bytes:
         props = "\n".join(f"[{k}]: [{v}]" for k, v in sorted(self.props.items()))
         battery = (
@@ -300,8 +306,11 @@ class FakeAdb:
         if command == "logcat -c":
             self.logcat_lines.clear()
             return b"", 0
+        if command == "ps -A -o PID,NAME":
+            return self._ps(), 0
         if " logcat -d " in command:  # phone-side grep stages are not emulated; droidxfer re-filters anyway
-            return (f"@@now {self.log_now}\n" + "".join(line + "\n" for line in self.logcat_lines)).encode(), 0
+            body = "".join(line + "\n" for line in self.logcat_lines)
+            return (f"@@now {self.log_now}\n@@ps\n".encode() + self._ps() + f"@@log\n{body}".encode()), 0
         if command.startswith("echo @@all"):
             return self._apps_output(), 0
         if command.startswith(("pm ", "cmd package ")):

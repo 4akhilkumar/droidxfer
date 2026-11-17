@@ -218,6 +218,9 @@ class TransferEngine:
             cleanup=list(cleanup or []),
         )
         self._enqueue(job)
+        arrow = "Mac -> phone" if job.direction == Direction.PUSH else "phone -> Mac"
+        log.info("transfer %s queued (%s, %s): %s -> %s, if exists: %s%s", job.id, arrow, device.id, job.title,
+                 dest_dir, conflict, ", MD5 check" if job.verify else "")
         return job
 
     def pause(self, job_id: str) -> TransferJob:
@@ -226,6 +229,7 @@ class TransferEngine:
             job.resume_event.clear()
             job.status = JobStatus.PAUSED
             self._emit(job)
+            log.info("transfer %s paused", job.id)
         return job
 
     def resume(self, job_id: str) -> TransferJob:
@@ -239,12 +243,14 @@ class TransferEngine:
                 job.status = JobStatus.QUEUED
             job.resume_event.set()
             self._emit(job)
+            log.info("transfer %s resumed", job.id)
         return job
 
     def cancel(self, job_id: str) -> TransferJob:
         job = self._get(job_id)
         if job.status in FINISHED:
             return job
+        log.info("transfer %s: cancel requested", job.id)
         if job.task and not job.task.done():
             job.task.cancel()
             job.resume_event.set()
@@ -281,6 +287,7 @@ class TransferEngine:
             ]
         self._enqueue(job)
         self._emit(old)
+        log.info("transfer %s retried as %s (%d file(s) left)", old.id, job.id, len(job.items) or len(job.sources))
         return job
 
     def clear_finished(self) -> list[str]:
@@ -357,6 +364,22 @@ class TransferEngine:
         job.speed = 0.0
         self._cleanup(job)
         self._emit(job)
+        self._log_summary(job)
+
+    def _log_summary(self, job: TransferJob) -> None:
+        took = job.finished_at - (job.started_at or job.created_at)
+        done_bytes = sum(i.size for i in job.items if i.status == "done")
+        rate = f", {_human(done_bytes / took)}/s" if took > 0.5 and done_bytes else ""
+        counts = f"{job.count('done')} copied, {job.count('skipped')} skipped, {job.count('failed')} failed"
+        summary = f"transfer {job.id} {job.status.value}: {counts}, {_human(done_bytes)} in {took:.1f} s{rate}"
+        if job.status == JobStatus.COMPLETED:
+            log.info(summary)
+        elif job.status == JobStatus.CANCELLED:
+            log.info(summary)
+        else:
+            failures = [f"{i.rel}: {i.error}" for i in job.items if i.status == "failed"][:10]
+            details = "".join(f"\n  {f}" for f in failures)
+            log.warning("%s (%s)%s", summary, job.error or "failed", details)
 
     def _cleanup(self, job: TransferJob, force: bool = False) -> None:
         # Staged uploads are kept for failed jobs so they can be retried.
@@ -405,6 +428,7 @@ class TransferEngine:
             job.started_at = time.time()
             job._emit_at, job._emit_bytes = time.monotonic(), 0
             self._emit(job)
+            log.info("transfer %s started: %d file(s), %s", job.id, job.count("pending"), _human(job.total_bytes))
             await self._create_dirs(job)
             await self._execute(job)
             if job.direction == Direction.PUSH and job.media_scan:
@@ -573,6 +597,7 @@ class TransferEngine:
     def _fail_item(self, job: TransferJob, item: TransferItem, exc: BaseException) -> None:
         item.status = "failed"
         item.error = str(exc) or exc.__class__.__name__
+        log.info("transfer %s: %s failed: %s", job.id, item.rel, item.error)
         job.total_bytes -= item.size - item.transferred
 
     def _skip_item(self, job: TransferJob, item: TransferItem) -> None:
