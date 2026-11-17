@@ -10,6 +10,7 @@ from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 
 CONFLICT_POLICIES = ("rename", "overwrite", "skip", "skip_identical")
+LOG_LEVELS = ("DEBUG", "INFO", "WARNING", "ERROR")
 
 
 def app_dir() -> Path:
@@ -44,6 +45,7 @@ class Settings:
     ask_before_transfer: bool = True
     external_drives: bool = True
     mtp: bool = True
+    log_level: str = "INFO"
     known_endpoints: list[KnownEndpoint] = field(default_factory=list)
 
     def public(self) -> dict:
@@ -78,6 +80,7 @@ EDITABLE_FIELDS = {
     "ask_before_transfer",
     "external_drives",
     "mtp",
+    "log_level",
 }
 
 
@@ -107,6 +110,8 @@ class ConfigStore:
                 setattr(settings, f.name, value)
         if settings.default_conflict not in CONFLICT_POLICIES:
             settings.default_conflict = "rename"
+        if settings.log_level not in LOG_LEVELS:
+            settings.log_level = "INFO"
         settings.known_endpoints = [ep for k in raw.get("known_endpoints") or [] if (ep := _endpoint(k))]
         return settings
 
@@ -123,6 +128,8 @@ class ConfigStore:
                 raise ValueError(f"unknown setting: {key}")
             if key == "default_conflict" and value not in CONFLICT_POLICIES:
                 raise ValueError(f"default_conflict must be one of {CONFLICT_POLICIES}")
+            if key == "log_level" and value not in LOG_LEVELS:
+                raise ValueError(f"log_level must be one of {LOG_LEVELS}")
             setattr(self.settings, key, value)
         self.save()
         return self.settings

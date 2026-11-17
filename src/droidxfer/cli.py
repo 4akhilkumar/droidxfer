@@ -18,6 +18,7 @@ from rich.progress import BarColumn, DownloadColumn, Progress, TextColumn, TimeR
 from rich.table import Table
 
 from .adb import AdbError
+from .core import applog
 from .core.context import AppContext
 from .core.devices import DeviceError
 from .core.paths import PathError
@@ -47,8 +48,17 @@ def run_async(fn: Callable[..., Awaitable[Any]]) -> Callable[..., Any]:
     return wrapper
 
 
+def _console_logging(verbose: bool) -> None:
+    """Problems (or everything with -v) to the terminal; the activity log file is set up separately."""
+    console_handler = logging.StreamHandler()
+    console_handler.setLevel(logging.INFO if verbose else logging.WARNING)
+    console_handler.setFormatter(logging.Formatter("%(levelname)s %(name)s: %(message)s"))
+    logging.getLogger().addHandler(console_handler)
+
+
 async def _context() -> AppContext:
     ctx = AppContext()
+    applog.setup(ctx.config.settings.log_level)
     await ctx.start(track=False)
     return ctx
 
@@ -135,7 +145,7 @@ def serve(
 
     from .api.app import create_app
 
-    logging.basicConfig(level=logging.INFO if verbose else logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
+    _console_logging(verbose)
     token = secrets.token_urlsafe(24)
     url = f"http://127.0.0.1:{port}/?token={token}"
     application = create_app(token=token, port=port)
@@ -517,22 +527,44 @@ if __name__ == "__main__":
 
 
 # logs ----------------------------------------------------------------------------
-_LEVEL_STYLE = {"V": "dim", "D": "dim", "I": "", "W": "yellow", "E": "red", "F": "bold red"}
+_SEVERITY_STYLE = {"debug": "dim", "info": "", "warning": "yellow", "error": "red", "critical": "bold red"}
 
 
-def _print_log_line(line, notes_only: bool) -> None:
+def _print_entry(entry: dict, notes_only: bool = False) -> None:
     from rich.markup import escape
 
-    if notes_only and not line.note:
+    if notes_only and not entry.get("note"):
         return
-    stamp = datetime.fromtimestamp(line.time).strftime("%H:%M:%S.%f")[:-3]
-    style = _LEVEL_STYLE.get(line.level, "")
-    msg = escape(line.message)
-    text = f"[dim]{stamp}[/dim] [{style or 'default'}]{line.level}[/] [cyan]{escape(line.tag)}[/cyan]: "
+    style = _SEVERITY_STYLE.get(entry["severity"], "")
+    msg = escape(entry["message"] + (f"\n{entry['extra']}" if entry.get("extra") else ""))
+    text = f"[dim]{entry['timestamp']}[/dim] [{style or 'default'}]{entry['level']}[/] [cyan]{escape(entry['source'])}[/cyan] "
     text += f"[{style}]{msg}[/]" if style else msg
-    if line.note:
-        text += f"  [bold blue]← {escape(line.note)}[/bold blue]"
+    if entry.get("note"):
+        text += f"  [bold blue]← {escape(entry['note'])}[/bold blue]"
     console.print(text, highlight=False, soft_wrap=True)
+
+
+def _query_params(range_: str, levels: str | None, pattern: str, case: bool, groups: str | None,
+                  streams: str | None, limit: int) -> dict[str, str]:
+    params = {"range": range_, "q": pattern, "limit": str(limit)}
+    if levels:
+        params["levels"] = levels.upper() if len(levels) > 1 and "," in levels else levels
+    if case:
+        params["case"] = "1"
+    if groups:
+        params["groups"] = groups
+    if streams:
+        params["streams"] = streams
+    return params
+
+
+RangeOpt = Annotated[str, typer.Option("--range", "-r", help="Time range, e.g. 5m 15m 1h (or 'all').")]
+LevelsOpt = Annotated[str | None, typer.Option("--levels", "-l", help="Comma-separated levels to show.")]
+PatternOpt = Annotated[str, typer.Option("--query", "-q", help='Filter pattern: terms, "phrase", -exclude, ?any, /regex/.')]
+CaseOpt = Annotated[bool, typer.Option("--case-sensitive", help="Match the pattern case-sensitively.")]
+GroupsOpt = Annotated[str | None, typer.Option("--groups", "-g", help="Comma-separated log groups.")]
+StreamsOpt = Annotated[str | None, typer.Option("--streams", help="Comma-separated log streams.")]
+LimitOpt = Annotated[int, typer.Option(help="How many of the newest matching entries to show (max 500).")]
 
 
 @app.command()
@@ -540,26 +572,31 @@ def _print_log_line(line, notes_only: bool) -> None:
 async def logs(
     device: DeviceOpt = None,
     preset: Annotated[str | None, typer.Option("--preset", "-p", help="headphones | bluetooth | crashes | audio")] = None,
-    minutes: Annotated[int, typer.Option("--minutes", "-m", help="How far back to look (0 = everything stored).")] = 10,
-    level: Annotated[str, typer.Option("--level", "-l", help="Lowest level: V D I W E F")] = "V",
-    search: Annotated[str, typer.Option("--search", "-s", help="Only lines containing this text.")] = "",
-    app_pkg: Annotated[str | None, typer.Option("--app", "-a", help="Only one app (package name).")] = None,
+    range_: RangeOpt = "15m",
+    levels: Annotated[str | None, typer.Option("--levels", "-l", help="Levels to show, e.g. W,E,F")] = None,
+    pattern: PatternOpt = "",
+    case: CaseOpt = False,
+    groups: Annotated[str | None, typer.Option("--groups", "-g", help="Apps/processes, e.g. org.videolan.vlc")] = None,
+    streams: Annotated[str | None, typer.Option("--tags", help="Log tags, comma-separated.")] = None,
+    app_pkg: Annotated[str | None, typer.Option("--app", "-a", help="Only one installed app (package name), including past runs.")] = None,
     follow: Annotated[bool, typer.Option("--follow", "-f", help="Keep printing new lines until Ctrl+C.")] = False,
-    limit: Annotated[int, typer.Option(help="Newest lines to show (not with --follow).")] = 5000,
+    limit: LimitOpt = 200,
     notes_only: Annotated[bool, typer.Option("--notes-only", help="Only lines with a plain-words explanation.")] = False,
     show_addresses: Annotated[bool, typer.Option("--show-addresses", help="Don't hide Bluetooth/Wi-Fi addresses.")] = False,
     save: Annotated[Path | None, typer.Option("--save", help="Also write the lines to this text file.")] = None,
     list_presets: Annotated[bool, typer.Option("--presets", help="List the ready-made filters and exit.")] = False,
     clear: Annotated[bool, typer.Option("--clear", help="Empty the phone's log (asks first) and exit.")] = False,
 ) -> None:
-    """Read the phone's system log (logcat), with ready-made filters that explain common events."""
+    """Read the PHONE's system log (logcat). For droidxfer's own log, see `droidxfer activity`."""
     from .core import logs as logcat
 
     if list_presets:
         for p in logcat.PRESETS.values():
             console.print(f"[bold]{p.id}[/bold]  {p.label}\n    [dim]{p.description}[/dim]")
         return
-    flt = logcat.LogFilter(preset=preset, min_level=level, query=search, app=app_pkg, mask=not show_addresses)
+    opts = logcat.PhoneOptions(preset=preset, app=app_pkg, mask=not show_addresses)
+    params = _query_params(range_, levels.upper() if levels else None, pattern, case, groups, streams, min(limit, 500))
+    logcat.query_from_params(params)  # validate early
     ctx = await _context()
     try:
         device_id = _pick_device(ctx, device)
@@ -573,26 +610,68 @@ async def logs(
             if follow:
                 console.print("[dim]Following the phone's log. Press Ctrl+C to stop.[/dim]")
                 try:
-                    async for line in ctx.logs.stream(device_id, flt):
-                        _print_log_line(line, notes_only)
-                        if out and (line.note or not notes_only):
-                            out.write(line.to_text() + "\n")
+                    async for entry in ctx.logs.stream(device_id, params, opts):
+                        _print_entry(entry, notes_only)
+                        if out and (entry["note"] or not notes_only):
+                            out.write(entry["raw"] + "\n")
                             out.flush()
                 except (KeyboardInterrupt, asyncio.CancelledError):
                     pass
             else:
-                res = await ctx.logs.dump(device_id, flt, minutes=minutes, limit=limit)
-                lines = [logcat.LogLine(**{k: v for k, v in d.items()}) for d in res["lines"]]
-                for line in lines:
-                    _print_log_line(line, notes_only)
+                result = await ctx.logs.run(device_id, params, opts)
+                page = result.page(0, int(params["limit"]))
+                entries = list(reversed(page["entries"]))  # oldest first in a terminal
+                for entry in entries:
+                    _print_entry(entry, notes_only)
                 if out:
-                    out.write(logcat.to_text([ln for ln in lines if ln.note or not notes_only]))
-                span = f"last {minutes} min" if minutes else "everything stored"
-                more = f" (newest {res['limit']} of {res['matched']})" if res["truncated"] else ""
-                console.print(f"[dim]{len(lines)} lines, {span}{more}.[/dim]")
+                    out.writelines(e["raw"] + "\n" for e in entries if e["note"] or not notes_only)
+                more = f" (newest {len(entries)} of {result.matched})" if result.matched > len(entries) else ""
+                console.print(f"[dim]{len(entries)} lines, range {range_}{more}.[/dim]")
         finally:
             if out:
                 out.close()
                 console.print(f"[dim]Saved to {save}[/dim]")
     finally:
         await ctx.stop()
+
+
+@app.command()
+@run_async
+async def activity(
+    range_: RangeOpt = "1h",
+    levels: LevelsOpt = None,
+    pattern: PatternOpt = "",
+    case: CaseOpt = False,
+    groups: GroupsOpt = None,
+    streams: StreamsOpt = None,
+    limit: LimitOpt = 100,
+    follow: Annotated[bool, typer.Option("--follow", "-f", help="Keep printing new entries until Ctrl+C.")] = False,
+    path: Annotated[bool, typer.Option("--path", help="Print where the log file is and exit.")] = False,
+) -> None:
+    """Read droidxfer's own activity log (transfers, connections, errors...)."""
+    from .core import logviewer
+
+    if path:
+        console.print(str(applog.log_path()))
+        return
+    params = _query_params(range_, levels.upper() if levels else None, pattern, case, groups, streams, min(limit, 500))
+    if follow:
+        params.pop("range")
+        data = logviewer.tail(params)
+        console.print("[dim]Following droidxfer's log. Press Ctrl+C to stop.[/dim]")
+        try:
+            while True:
+                for entry in data["entries"]:
+                    _print_entry(entry)
+                await asyncio.sleep(2)
+                data = logviewer.tail(params | {"offset": str(data["offset"]), "inode": data["inode"] or ""})
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            return
+    data = logviewer.search(params)
+    for entry in reversed(data["entries"]):
+        _print_entry(entry)
+    if not data["file"]:
+        console.print(f"[dim]No log yet ({applog.log_path()}).[/dim]")
+    else:
+        more = " (more with a larger --limit or a narrower --range)" if data["next_cursor"] else ""
+        console.print(f"[dim]{len(data['entries'])} entries, range {range_}{more}. File: {data['file']['path']}[/dim]")
