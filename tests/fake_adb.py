@@ -18,6 +18,30 @@ from droidxfer.adb.sync import _DENT_V1, _DENT_V2, _HDR, _STAT_V1, _STAT_V2
 _SHELL_HDR = struct.Struct("<BI")
 
 
+SAMPLE_LOG = [
+    "--------- beginning of main",
+    "         1700000000.100  7507  7507 I avrcp   : device.cc:1654 MessageReceived: opcode=Opcode::PASS_THROUGH",
+    "         1700000000.110  2945  3001 D MediaSessionService: dispatchMediaKeyEvent, pkg=com.android.bluetooth "
+    "pid=7507, uid=1002, asSystem=false, event=KeyEvent { action=ACTION_DOWN, keyCode=KEYCODE_MEDIA_PAUSE, scanCode=0 }",
+    "         1700000000.111  2945  3001 D MediaSessionService: dispatchMediaKeyEvent, pkg=com.android.bluetooth "
+    "pid=7507, uid=1002, asSystem=false, event=KeyEvent { action=ACTION_UP, keyCode=KEYCODE_MEDIA_PAUSE, scanCode=0 }",
+    "         1700000000.120  7507  7520 I avrcp   : PlaybackStatusNotificationResponse: Update PlaybackStatus 1 -> 2",
+    "         1700000001.000  2945  3001 D MediaSessionService: dispatchMediaKeyEvent, "
+    "pkg=com.google.android.googlequicksearchbox pid=6682, uid=10299, asSystem=false, "
+    "event=KeyEvent { action=ACTION_DOWN, keyCode=KEYCODE_MEDIA_PLAY_PAUSE, scanCode=0 }",
+    "         1700000002.000  7507  7507 I bluetooth: [From Service] A2DP connection state changed: "
+    "AA:BB:CC:DD:F1:26STATE_CONNECTING -> STATE_CONNECTED",
+    "         1700000003.000  2945  3100 I MediaFocusControl: requestAudioFocus() from uid/pid 10057/4266 "
+    "AA=USAGE_NOTIFICATION/CONTENT_TYPE_SONIFICATION clientId=android.media.AudioManager@2af74bc "
+    "callingPack=com.android.systemui req=3 flags=0x0",
+    "         1700000004.000  2945  3100 E ActivityManager: ANR in com.example.game",
+    "         1700000005.000 12345 12345 E AndroidRuntime: FATAL EXCEPTION: main",
+    "         1700000005.001 12345 12345 E AndroidRuntime: Process: com.example.game, PID: 12345",
+    "         1700000006.000  1234  1234 I adbd    : shell command: logcat -d | grep -E 'opcode=Opcode::PASS_THROUGH'",
+    "         1700000007.000  3000  3000 W WifiService: connected to AA:BB:CC:DD:EE:FF",
+]
+
+
 def lp(text: str) -> bytes:
     data = text.encode()
     return b"%04x" % len(data) + data
@@ -103,6 +127,11 @@ class FakeAdb:
             "ime": "com.google.android.inputmethod.latin/com.android.inputmethod.latin.LatinIME",
         }
         self.selinux = "Enforcing"
+        self.log_now = 1_700_000_010
+        self.logcat_lines: list[str] = list(SAMPLE_LOG)
+        self.processes: dict[int, str] = {
+            7507: "com.android.bluetooth", 2945: "system_server", 12345: "com.example.game",
+        }
         self._loop: asyncio.AbstractEventLoop | None = None
         self._thread: threading.Thread | None = None
         self._server: asyncio.base_events.Server | None = None
@@ -174,7 +203,7 @@ class FakeAdb:
                     await self._sync(r, w)
                 elif svc.startswith("shell,v2,raw:"):
                     w.write(b"OKAY")
-                    await self._shell(svc[len("shell,v2,raw:"):], w)
+                    await self._shell(svc[len("shell,v2,raw:"):], w, r)
                 elif svc.startswith("tcpip:"):
                     w.write(b"OKAY" + f"restarting in TCP mode port: {svc[6:]}\n".encode())
                 else:
@@ -188,13 +217,24 @@ class FakeAdb:
             w.close()
 
     # shell -----------------------------------------------------------------------
-    async def _shell(self, command: str, w: asyncio.StreamWriter) -> None:
+    async def _shell(self, command: str, w: asyncio.StreamWriter, r: asyncio.StreamReader | None = None) -> None:
         self.shell_log.append(command)
+        if command.startswith("logcat ") and " -d " not in command and " -c" not in command:
+            # live logcat: send what's in the buffer, then keep going until the client hangs up
+            data = "".join(line + "\n" for line in self.logcat_lines).encode()
+            w.write(_SHELL_HDR.pack(1, len(data)) + data)
+            await w.drain()
+            if r is not None:
+                await r.read()
+            return
         out, code = self._run_shell(command)
         if out:
             w.write(_SHELL_HDR.pack(1, len(out)) + out)
         w.write(_SHELL_HDR.pack(3, 1) + bytes([code]))
         await w.drain()
+
+    def _ps(self) -> bytes:
+        return "".join(f"{pid:>5} {name}\n" for pid, name in [("PID", "NAME"), *self.processes.items()]).encode()
 
     def _info_output(self) -> bytes:
         props = "\n".join(f"[{k}]: [{v}]" for k, v in sorted(self.props.items()))
@@ -260,6 +300,17 @@ class FakeAdb:
         return f"Unknown command: {verb}\n".encode(), 1
 
     def _run_shell(self, command: str) -> tuple[bytes, int]:
+        if command.startswith("pm list packages --user 0 -U "):
+            name = shlex.split(command)[-1]
+            return "".join(f"package:{p} uid:10{len(p)}\n" for p in self.packages if name in p).encode(), 0
+        if command == "logcat -c":
+            self.logcat_lines.clear()
+            return b"", 0
+        if command == "ps -A -o PID,NAME":
+            return self._ps(), 0
+        if " logcat -d " in command:  # phone-side grep stages are not emulated; droidxfer re-filters anyway
+            body = "".join(line + "\n" for line in self.logcat_lines)
+            return (f"@@now {self.log_now}\n@@ps\n".encode() + self._ps() + f"@@log\n{body}".encode()), 0
         if command.startswith("echo @@all"):
             return self._apps_output(), 0
         if command.startswith(("pm ", "cmd package ")):

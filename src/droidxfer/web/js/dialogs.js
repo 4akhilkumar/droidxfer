@@ -87,6 +87,7 @@ export async function settingsDialog(settings) {
   f.prefer_usb.checked = settings.prefer_usb;
   f.ask_before_transfer.checked = settings.ask_before_transfer;
   f.adb_path.value = settings.adb_path || '';
+  f.log_level.value = settings.log_level || 'INFO';
   dialog.returnValue = '';
   dialog.showModal();
   if ((await waitClose(dialog)) !== 'ok') return null;
@@ -100,5 +101,6 @@ export async function settingsDialog(settings) {
     prefer_usb: f.prefer_usb.checked,
     ask_before_transfer: f.ask_before_transfer.checked,
     adb_path: f.adb_path.value.trim() || null,
+    log_level: f.log_level.value,
   };
 }

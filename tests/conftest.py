@@ -16,6 +16,18 @@ def no_real_usb(monkeypatch):
     monkeypatch.setattr("droidxfer.core.mtpdevices.scan_usb", lambda: [])
 
 
+@pytest.fixture(autouse=True)
+def app_log_dir(tmp_path, monkeypatch):
+    """droidxfer's own log goes to a per-test folder (never ~/Library/Logs, never the fake Mac home)."""
+    from droidxfer.core import applog
+
+    folder = tmp_path / "app-logs"
+    monkeypatch.setattr(applog, "log_dir", lambda: folder)
+    applog.teardown()
+    yield folder
+    applog.teardown()
+
+
 @pytest.fixture
 def device_root(tmp_path):
     root = tmp_path / "device"

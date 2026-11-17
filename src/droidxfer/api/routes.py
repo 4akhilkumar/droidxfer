@@ -3,28 +3,35 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import mimetypes
 import os
 import re
 import secrets
 import shutil
+import time
 from pathlib import PurePosixPath
 from typing import Any, Literal
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, StreamingResponse
+from starlette.concurrency import iterate_in_threadpool
 from PIL import UnidentifiedImageError
 from pydantic import BaseModel, Field
 
 from .. import __version__
 from ..core.context import AppContext
 from ..core import deviceinfo
+from ..core import applog
+from ..core import logs as logcat
+from ..core import logviewer
 from ..core.paths import validate_name
 from ..core.thumbs import PREVIEW_SIZE
 from ..core.transfer import Direction
 
 router = APIRouter()
+log = logging.getLogger(__name__)
 Conflict = Literal["rename", "overwrite", "skip", "skip_identical"]
 _UPLOAD_ID = re.compile(r"^[0-9a-f]{16}$")
 _UPLOAD_FLUSH = 1024 * 1024
@@ -99,6 +106,7 @@ class SettingsBody(BaseModel):
     ask_before_transfer: bool | None = None
     external_drives: bool | None = None
     mtp: bool | None = None
+    log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] | None = None
 
 
 # helpers --------------------------------------------------------------------------
@@ -160,7 +168,11 @@ async def get_settings(ctx: AppContext = Ctx) -> dict[str, Any]:
 
 @router.put("/settings")
 async def put_settings(body: SettingsBody, ctx: AppContext = Ctx) -> dict[str, Any]:
-    settings = ctx.config.update(body.model_dump(exclude_unset=True)).public()
+    changes = body.model_dump(exclude_unset=True)
+    settings = ctx.config.update(changes).public()
+    if "log_level" in changes:
+        applog.set_level(settings["log_level"])
+    log.info("settings changed: %s", ", ".join(f"{k}={v}" for k, v in sorted(changes.items())))
     ctx.devices.republish()  # e.g. "prefer USB" changes which transport is shown as active
     return settings
 
@@ -221,22 +233,28 @@ async def device_storage(device_id: str, path: str = "/sdcard", ctx: AppContext 
 
 @router.post("/devices/{device_id}/mkdir")
 async def device_mkdir(device_id: str, body: MkdirBody, ctx: AppContext = Ctx) -> dict:
-    return {"path": await ctx.remote.mkdir(device_id, body.parent, body.name)}
+    path = await ctx.remote.mkdir(device_id, body.parent, body.name)
+    log.info("phone %s: created folder %s", device_id, path)
+    return {"path": path}
 
 
 @router.post("/devices/{device_id}/rename")
 async def device_rename(device_id: str, body: RenameBody, ctx: AppContext = Ctx) -> dict:
-    return {"path": await ctx.remote.rename(device_id, body.path, body.name)}
+    path = await ctx.remote.rename(device_id, body.path, body.name)
+    log.info("phone %s: renamed %s -> %s", device_id, body.path, path)
+    return {"path": path}
 
 
 @router.post("/devices/{device_id}/delete")
 async def device_delete(device_id: str, body: PathsBody, ctx: AppContext = Ctx) -> dict:
-    return {"deleted": await ctx.remote.delete(device_id, body.paths)}
+    deleted = await ctx.remote.delete(device_id, body.paths)
+    log.info("phone %s: deleted %d item(s): %s", device_id, len(deleted), ", ".join(deleted[:20]))
+    return {"deleted": deleted}
 
 
 @router.post("/devices/{device_id}/tcpip")
 async def device_tcpip(device_id: str, body: TcpipBody, ctx: AppContext = Ctx) -> dict:
-    return {"message": await ctx.wireless.enable_tcpip(device_id, body.port)}
+    return {"message": await ctx.wireless.enable_tcpip(device_id, body.port)}  # logged by WirelessManager
 
 
 # apps (remove preinstalled apps) -----------------------------------------------------
@@ -336,17 +354,23 @@ async def local_file(path: str, ctx: AppContext = Ctx) -> FileResponse:
 
 @router.post("/local/mkdir")
 async def local_mkdir(body: MkdirBody, ctx: AppContext = Ctx) -> dict:
-    return {"path": await asyncio.to_thread(ctx.local.mkdir, body.parent, body.name)}
+    path = await asyncio.to_thread(ctx.local.mkdir, body.parent, body.name)
+    log.info("Mac: created folder %s", path)
+    return {"path": path}
 
 
 @router.post("/local/rename")
 async def local_rename(body: RenameBody, ctx: AppContext = Ctx) -> dict:
-    return {"path": await asyncio.to_thread(ctx.local.rename, body.path, body.name)}
+    path = await asyncio.to_thread(ctx.local.rename, body.path, body.name)
+    log.info("Mac: renamed %s -> %s", body.path, path)
+    return {"path": path}
 
 
 @router.post("/local/delete")
 async def local_delete(body: PathsBody, ctx: AppContext = Ctx) -> dict:
-    return {"trashed": await asyncio.to_thread(ctx.local.trash, body.paths)}
+    trashed = await asyncio.to_thread(ctx.local.trash, body.paths)
+    log.info("Mac: moved %d item(s) to the Trash: %s", len(trashed), ", ".join(trashed[:20]))
+    return {"trashed": trashed}
 
 
 # transfers ------------------------------------------------------------------------
@@ -478,6 +502,7 @@ async def wireless_disconnect(body: SerialBody, ctx: AppContext = Ctx) -> dict:
 @router.post("/wireless/forget")
 async def wireless_forget(body: HostPortBody, ctx: AppContext = Ctx) -> dict:
     ctx.wireless.forget(body.host, body.port)
+    log.info("Wi-Fi: forgot %s:%d", body.host, body.port)
     return {"ok": True}
 
 
@@ -497,6 +522,131 @@ async def wireless_qr_status(name: str, ctx: AppContext = Ctx) -> dict:
 async def wireless_qr_cancel(name: str, ctx: AppContext = Ctx) -> dict:
     ctx.wireless.cancel_qr(name)
     return {"ok": True}
+
+
+# logs: droidxfer's own activity log + the phone's log (logcat) ------------------------
+def _params(request: Request) -> dict[str, str]:
+    return dict(request.query_params)
+
+
+def _download(lines, prefix: str) -> StreamingResponse:
+    name = f"{prefix}-{time.strftime('%Y%m%d-%H%M%S')}.log"
+    return StreamingResponse(
+        lines, media_type="text/plain; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{name}"', "Cache-Control": "no-store"},
+    )
+
+
+@router.get("/logs/app")
+async def app_logs(request: Request, action: str = "search", ctx: AppContext = Ctx):
+    """droidxfer's own log, queried like matrix_sols: meta, search, histogram, tail and download."""
+    params = _params(request)
+    if action == "meta":
+        data = await asyncio.to_thread(logviewer.meta)
+        return data | {"log_level": ctx.config.settings.log_level}
+    if action == "search":
+        return await asyncio.to_thread(logviewer.search, params)
+    if action == "histogram":
+        return await asyncio.to_thread(logviewer.histogram, params)
+    if action == "tail":
+        return await asyncio.to_thread(logviewer.tail, params)
+    if action == "download":
+        logviewer.LogQuery.from_params(params)  # validate before streaming so errors come back as JSON
+        return _download(iterate_in_threadpool(logviewer.iter_download(params)), "droidxfer-activity")
+    raise HTTPException(400, "invalid action")
+
+
+@router.get("/logs/phone/meta")
+async def phone_logs_meta() -> dict:
+    return logcat.meta()
+
+
+def _phone_options(params: dict[str, str]) -> logcat.PhoneOptions:
+    mask = params.get("mask", "1").lower() not in ("0", "false", "no")
+    notes = params.get("notes", "0").lower() in ("1", "true", "yes")
+    return logcat.PhoneOptions(preset=params.get("preset"), app=params.get("app"), mask=mask, notes_only=notes)
+
+
+@router.get("/devices/{device_id}/logs")
+async def phone_logs(device_id: str, request: Request, action: str = "search", ctx: AppContext = Ctx):
+    """The phone's log: search (first page + histogram + groups, or the next page with `cursor`) and download."""
+    params = _params(request)
+    opts = _phone_options(params)
+    if action == "search":
+        return await ctx.logs.search(device_id, params, opts)
+    if action == "download":
+        logcat.query_from_params(params)
+        return _download(iterate_in_threadpool(await ctx.logs.download(device_id, params, opts)), "phone-log")
+    raise HTTPException(400, "invalid action")
+
+
+@router.post("/devices/{device_id}/logs/clear")
+async def phone_logs_clear(device_id: str, ctx: AppContext = Ctx) -> dict:
+    await ctx.logs.clear(device_id)
+    return {"ok": True}
+
+
+_LIVE_FLUSH = 0.25  # seconds between batches sent to the browser
+_LIVE_BATCH = 500  # entries per message at most
+
+
+@router.websocket("/devices/{device_id}/logs/live")
+async def phone_logs_live(ws: WebSocket, device_id: str) -> None:
+    """Live tail of the phone's log as JSON batches: {"type": "entries", "entries": [...]}; ends with "error"."""
+    ctx: AppContext = ws.app.state.ctx
+    await ws.accept()
+    params = dict(ws.query_params)
+    try:
+        opts = _phone_options(params)
+        query = logcat.query_from_params(params, require_range=False)
+    except ValueError as exc:
+        await ws.send_json({"type": "error", "message": str(exc)})
+        await ws.close()
+        return
+
+    batch: list[dict] = []
+    failure: list[str] = []
+
+    async def read() -> None:
+        try:
+            async for entry in ctx.logs.stream(device_id, params, opts):
+                batch.append(entry)
+                if len(batch) >= _LIVE_BATCH * 4:  # browser can't keep up: drop the oldest
+                    del batch[: len(batch) - _LIVE_BATCH * 4]
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # device unplugged, adb restarted, MTP-only phone...
+            failure.append(str(exc) or exc.__class__.__name__)
+        else:
+            failure.append("the phone stopped sending logs (disconnected?)")
+
+    async def drain() -> None:
+        try:
+            while True:
+                await ws.receive_text()
+        except WebSocketDisconnect:
+            return
+
+    reader = asyncio.create_task(read())
+    receiver = asyncio.create_task(drain())
+    try:
+        await ws.send_json({"type": "started", **query.echo()})
+        while not receiver.done():
+            await asyncio.sleep(_LIVE_FLUSH)
+            while batch:
+                chunk = batch[:_LIVE_BATCH]
+                del batch[:_LIVE_BATCH]
+                await ws.send_json({"type": "entries", "entries": chunk})
+            if reader.done():
+                await ws.send_json({"type": "error", "message": failure[0] if failure else "stopped"})
+                await ws.close()
+                break
+    except (WebSocketDisconnect, RuntimeError):
+        pass
+    finally:
+        reader.cancel()
+        receiver.cancel()
+        await asyncio.gather(reader, receiver, return_exceptions=True)
 
 
 # live events ----------------------------------------------------------------------

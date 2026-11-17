@@ -135,6 +135,42 @@ tests/        fake_adb.py (in-process fake adb server) + tests
   marks them preloaded_by="Samsung"; they count as preinstalled in filters and get a "removed completely" warning
   on uninstall. Live on the S25 (user-approved): Samsung Tips disabled via CLI, confirmed enabled=3, then
   `apps restore --all` re-enabled it; undo log recorded both. 110 tests passing.
+- Session 6 (2026-11-17): log viewer on branch feature/log-viewer, after diagnosing a WH-1000XM5 "pauses when
+  put on" bug by hand (cause: Google Assistant on the headphones relays wear events as a PLAY_PAUSE toggle via the
+  Google app; switching the Sony app's voice assistant to the phone's made the XM5 send real AVRCP PAUSE/PLAY).
+  core/logs.py: `logcat -v threadtime -v epoch`, buffers main,system,crash; dump = `logcat -d` with a time window
+  via `-T "$(($(date +%s)-N)).000"` computed on the phone; filterspec (`'*:W'`) must come after the options;
+  app filter = `--uid=` from `pm list packages --user 0 -U pkg` (plain `pm list packages -U` errors on user 150 =
+  Secure Folder). Presets (headphones/bluetooth/crashes/audio) grep on the phone first (toybox grep -E / -iF;
+  the S25 logs ~30k lines/min, 189k lines in 10 min) and re-filter in Python; explain() adds plain-words notes
+  (key events by sender, AVRCP play status 1=playing 2=paused, profile connection states, audio focus usages,
+  ANR/FATAL/died). adbd logs our own `logcat | grep` command, so adbd lines mentioning logcat are dropped (else
+  the headphones preset matched itself). "has died: cch/prev/..." = Android freeing memory, excluded from crashes.
+  Live = WebSocket /api/devices/{id}/logs/live (Python-side filtering; batches every 250 ms, capped), REST dump,
+  POST clear (`logcat -c`, confirmed in UI/CLI). Web: Logs dialog (web/js/logs.js); CLI: `droidxfer logs`.
+  MAC masking keeps the last 2 bytes, also when glued to text ("F1:26STATE_CONNECTED"). Verified on the S25 in the
+  browser (dump, headphones preset notes, live follow + stop) and CLI. 144 tests passing.
+- Session 6, part 2 (2026-11-17): log system ported from matrix_sols (ms_apps/security/log_viewer.py +
+  static/js/application_logs.js + settings.LOGGING). User chose: both droidxfer's own activity log and the phone
+  log in one Logs window (two tabs), all viewer features. core/applog.py: same line format as matrix_sols
+  (`{asctime} [{levelname}] {pathname}:{lineno}:{funcName} - {message}`, %d-%b-%y), relative paths, masking in the
+  formatter (registered secrets: session token, pairing code, QR password; `token=`; home -> ~), file
+  ~/Library/Logs/droidxfer/droidxfer.log (DROIDXFER_HOME -> <home>/logs). Server + CLI processes write at once,
+  so a LockedRotatingFileHandler (flock on droidxfer.log.lock, O_APPEND, rotate under the lock at 5 MB x 3) instead
+  of matrix_sols' WatchedFileHandler + external logrotate. Setting `log_level` (DEBUG/INFO/WARNING/ERROR).
+  Activity logging added: transfers (queued/started/summary/failed files), adb/MTP device changes (DEBUG in CLI
+  runs, which re-list devices every command), Wi-Fi, apps, file ops, settings, API errors (4xx WARNING/INFO, 5xx
+  ERROR, unexpected exceptions with traceback). core/logviewer.py = port of log_viewer.py (FilterPattern,
+  LogQuery, backwards chunked reads, byte-offset cursors, histogram, rotation-aware tail, download, meta);
+  groups = feature (core/<module>), adb, mtp, api, cli, or library. Phone tab reuses LogQuery/FilterPattern/
+  HistogramBuilder: group = process (ps -A -o PID,NAME in the same round trip), stream = tag; result cached
+  (qid) for Load more/Download; "Explained only" is server-side. Perf finding on the S25: toybox `grep -E` with
+  alternation over 15 min (~300k lines) took 14.8 s, `grep -F -e ... -e ...` 0.5 s -> presets carry fixed
+  `terms` for the phone and keep the regex for Python (test checks the terms cover the regex). Custom end is
+  inclusive to the whole second for ms-precision phone lines. Web: web/js/logviewer.js (component) +
+  web/js/logs.js (tabs, adapters); Logs button no longer needs a phone. CLI: `logs` (phone; -r/-l/-q/-g/--tags)
+  and new `activity`. Verified in the browser on the S25 (both tabs: search, histogram, patterns + highlight,
+  expand, live tail both tabs, presets ~0.5 s). 183 tests passing.
 
 ## Possible next steps / ideas
 - Rate the 31 remaining unknown S25 packages when documented.

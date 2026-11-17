@@ -3,6 +3,7 @@
 import { api, connectEvents, qs } from './api.js';
 import { AppsDialog } from './apps.js';
 import { DeviceInfoDialog } from './deviceinfo.js';
+import { LogsDialog } from './logs.js';
 import { settingsDialog, transferOptions } from './dialogs.js';
 import { FilePane } from './pane.js';
 import { TransfersPanel } from './transfers.js';
@@ -27,6 +28,7 @@ let transfers;
 let wireless;
 let deviceInfo;
 let appsDialog;
+let logsDialog;
 
 const currentDevice = () => state.devices.find((d) => d.id === state.deviceId) || null;
 const deviceReady = () => currentDevice()?.state === 'device';
@@ -347,6 +349,10 @@ async function init() {
     if (!deviceReady()) return;
     appsDialog ??= new AppsDialog();
     appsDialog.open(currentDevice());
+  });
+  $('#btn-logs').addEventListener('click', () => {
+    logsDialog ??= new LogsDialog();
+    logsDialog.open(currentDevice());
   });
   $('#btn-wireless').addEventListener('click', () => wireless.open(deviceReady() && currentDevice().connection === 'usb' ? 'usb' : 'qr'));
   $('#btn-settings').addEventListener('click', async () => {

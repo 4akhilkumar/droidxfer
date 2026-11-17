@@ -173,6 +173,7 @@ class DeviceManager:
                 t.state = e.state
                 t.model_hint = e.model or t.model_hint
                 current[e.serial] = t
+            self._log_changes(self._transports, current)
             self._transports = current
             pending = [t for t in current.values() if t.state == "device" and not t.resolved]
             if pending:
@@ -188,6 +189,8 @@ class DeviceManager:
             t.serialno = lines[0] or t.serial
             t.manufacturer, t.model, t.android_version, t.sdk = lines[1:5]
             t.resolved = True
+            log.log(self._event_level, "phone ready: %s %s, Android %s, over %s (%s)", t.manufacturer, t.model, t.android_version,
+                     "Wi-Fi" if t.kind == "wifi" else "USB", t.serial)
         except Exception as exc:
             log.info("could not query %s (attempt %d): %s", t.serial, t.attempts, exc)
             if t.attempts < MAX_RESOLVE_ATTEMPTS:
@@ -200,6 +203,23 @@ class DeviceManager:
             if port.isdigit():
                 self.config.remember_endpoint(host.strip("[]"), int(port), t.model, t.serialno or "")
 
+    @property
+    def _event_level(self) -> int:
+        # A CLI command re-lists the phones every run: keep that out of the activity log unless "Detailed".
+        return logging.INFO if self.tracking else logging.DEBUG
+
+    def _log_changes(self, before: dict[str, Transport], after: dict[str, Transport]) -> None:
+        for serial, t in after.items():
+            old = before.get(serial)
+            if old is None:
+                log.log(self._event_level, "adb: %s connected over %s (%s)", serial, "Wi-Fi" if t.kind == "wifi" else "USB", t.state)
+            elif old.state != t.state:
+                level = logging.WARNING if t.state in ("unauthorized", "offline") else logging.INFO
+                log.log(level, "adb: %s is now %s (was %s)", serial, t.state, old.state)
+        for serial, old in before.items():
+            if serial not in after:
+                log.info("adb: %s disconnected (%s %s)", serial, old.manufacturer, old.model or old.model_hint or "")
+
     async def _retry_resolve(self, serial: str) -> None:
         await asyncio.sleep(3)
         async with self._lock:
@@ -211,7 +231,15 @@ class DeviceManager:
 
     def set_mtp_transports(self, transports: list[Transport]) -> None:
         """Replace the MTP ("File transfer" mode) transports found by the USB scanner."""
-        self._mtp = {t.serial: t for t in transports}
+        new = {t.serial: t for t in transports}
+        for serial, t in new.items():
+            old = self._mtp.get(serial)
+            if old is None or old.state != t.state:
+                log.log(self._event_level, "USB (File transfer): %s %s is %s", t.manufacturer, t.model, t.state.replace("_", " "))
+        for serial, old in self._mtp.items():
+            if serial not in new:
+                log.info("USB (File transfer): %s %s unplugged", old.manufacturer, old.model)
+        self._mtp = new
         self._publish()
 
     def republish(self) -> None:

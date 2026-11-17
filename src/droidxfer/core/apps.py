@@ -11,6 +11,7 @@ Every action is recorded in a per-phone log under the app data folder so it can 
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import shlex
@@ -22,6 +23,8 @@ from .appcatalog import AppCatalog
 from .config import app_dir
 from .devices import DeviceManager
 from .remotefs import RemoteFS
+
+log = logging.getLogger(__name__)
 
 ACTIONS = ("disable", "uninstall", "restore")
 PACKAGE_RE = re.compile(r"^[A-Za-z][A-Za-z0-9_]*(\.[A-Za-z0-9_]+)+$")
@@ -253,6 +256,13 @@ class AppManager:
                     break
             results.append(result | {"ok": ok, "message": message})
             self._record(serial, device_id, result | {"ok": ok, "message": message})
+            if ok:
+                log.info("apps on %s: %s %s (was %s)", device_id, action, step["package"], step["before"])
+            else:
+                log.warning("apps on %s: %s %s failed: %s", device_id, action, step["package"], message)
+        skipped = sum(1 for r in results if r["ok"] is None)
+        if skipped:
+            log.info("apps on %s: %s skipped for %d package(s)", device_id, action, skipped)
         return results
 
     async def restore_all(self, device_id: str) -> list[dict]:
