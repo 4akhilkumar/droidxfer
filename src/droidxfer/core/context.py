@@ -13,6 +13,7 @@ from .events import EventBus
 from .appcatalog import AppCatalog
 from .apps import AppManager
 from .localfs import VOLUMES, LocalFS
+from .logs import LogReader
 from .mtpdevices import MtpManager
 from .remotefs import RemoteFS
 from .thumbs import ThumbnailService
@@ -46,6 +47,7 @@ class AppContext:
         self.thumbs = ThumbnailService(self.local, self.remote, self.devices)
         self.catalog = AppCatalog()
         self.apps = AppManager(self.remote, self.devices, self.catalog)
+        self.logs = LogReader(self.remote)
         self.uploads_dir = cache_dir() / "uploads"
 
     async def start(self, *, track: bool = True) -> None:

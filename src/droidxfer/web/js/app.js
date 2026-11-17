@@ -3,6 +3,7 @@
 import { api, connectEvents, qs } from './api.js';
 import { AppsDialog } from './apps.js';
 import { DeviceInfoDialog } from './deviceinfo.js';
+import { LogsDialog } from './logs.js';
 import { settingsDialog, transferOptions } from './dialogs.js';
 import { FilePane } from './pane.js';
 import { TransfersPanel } from './transfers.js';
@@ -27,6 +28,7 @@ let transfers;
 let wireless;
 let deviceInfo;
 let appsDialog;
+let logsDialog;
 
 const currentDevice = () => state.devices.find((d) => d.id === state.deviceId) || null;
 const deviceReady = () => currentDevice()?.state === 'device';
@@ -268,6 +270,10 @@ function renderDevices() {
   $('#btn-apps').title = device?.capabilities?.adb === false
     ? 'Removing apps needs USB debugging; this phone is in File transfer (MTP) mode.'
     : 'Disable or remove preinstalled apps';
+  $('#btn-logs').disabled = !deviceReady() || device?.capabilities?.adb === false;
+  $('#btn-logs').title = device?.capabilities?.adb === false
+    ? "Reading logs needs USB debugging; this phone is in File transfer (MTP) mode."
+    : "Read the phone's system log";
   const adb = $('#adb-status');
   adb.hidden = state.adb.ok;
   adb.textContent = 'ADB unavailable';
@@ -347,6 +353,11 @@ async function init() {
     if (!deviceReady()) return;
     appsDialog ??= new AppsDialog();
     appsDialog.open(currentDevice());
+  });
+  $('#btn-logs').addEventListener('click', () => {
+    if (!deviceReady()) return;
+    logsDialog ??= new LogsDialog();
+    logsDialog.open(currentDevice());
   });
   $('#btn-wireless').addEventListener('click', () => wireless.open(deviceReady() && currentDevice().connection === 'usb' ? 'usb' : 'qr'));
   $('#btn-settings').addEventListener('click', async () => {

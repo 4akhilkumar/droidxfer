@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 from .. import __version__
 from ..core.context import AppContext
 from ..core import deviceinfo
+from ..core import logs as logcat
 from ..core.paths import validate_name
 from ..core.thumbs import PREVIEW_SIZE
 from ..core.transfer import Direction
@@ -497,6 +498,108 @@ async def wireless_qr_status(name: str, ctx: AppContext = Ctx) -> dict:
 async def wireless_qr_cancel(name: str, ctx: AppContext = Ctx) -> dict:
     ctx.wireless.cancel_qr(name)
     return {"ok": True}
+
+
+# logs (logcat) ---------------------------------------------------------------------
+def _log_filter(preset: str | None, level: str, q: str, app: str | None, mask: bool) -> logcat.LogFilter:
+    return logcat.LogFilter(preset=preset, min_level=level, query=q, app=app, mask=mask)
+
+
+@router.get("/logs/presets")
+async def logs_presets() -> dict:
+    return {
+        "presets": logcat.presets(),
+        "levels": [{"id": k, "label": v} for k, v in logcat.LEVEL_NAMES.items()],
+        "windows": list(logcat.WINDOWS),
+        "default_window": logcat.DEFAULT_WINDOW,
+    }
+
+
+@router.get("/devices/{device_id}/logs")
+async def logs_dump(
+    device_id: str,
+    minutes: int = Query(logcat.DEFAULT_WINDOW, ge=0, le=24 * 60),
+    preset: str | None = None,
+    level: str = "V",
+    q: str = "",
+    app: str | None = None,
+    mask: bool = True,
+    limit: int = Query(logcat.DEFAULT_LIMIT, ge=1, le=logcat.MAX_LIMIT),
+    ctx: AppContext = Ctx,
+) -> dict:
+    flt = _log_filter(preset, level, q, app, mask)
+    return await ctx.logs.dump(device_id, flt, minutes=minutes, limit=limit)
+
+
+@router.post("/devices/{device_id}/logs/clear")
+async def logs_clear(device_id: str, ctx: AppContext = Ctx) -> dict:
+    await ctx.logs.clear(device_id)
+    return {"ok": True}
+
+
+_LIVE_FLUSH = 0.25  # seconds between batches sent to the browser
+_LIVE_BATCH = 500  # lines per message at most
+
+
+@router.websocket("/devices/{device_id}/logs/live")
+async def logs_live(ws: WebSocket, device_id: str) -> None:
+    """Stream new log lines as JSON batches: {"type": "lines", "lines": [...]}; errors end with {"type": "error"}."""
+    ctx: AppContext = ws.app.state.ctx
+    await ws.accept()
+    params = ws.query_params
+    try:
+        flt = _log_filter(
+            params.get("preset"), params.get("level", "V"), params.get("q", ""), params.get("app"),
+            params.get("mask", "true").lower() not in ("0", "false", "no"),
+        )
+    except ValueError as exc:
+        await ws.send_json({"type": "error", "message": str(exc)})
+        await ws.close()
+        return
+
+    batch: list[dict] = []
+    failure: list[str] = []
+
+    async def read() -> None:
+        try:
+            async for line in ctx.logs.stream(device_id, flt):
+                batch.append(line.to_dict())
+                if len(batch) >= _LIVE_BATCH * 4:  # browser can't keep up: drop the oldest
+                    del batch[: len(batch) - _LIVE_BATCH * 4]
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:  # device unplugged, adb restarted, MTP-only phone...
+            failure.append(str(exc) or exc.__class__.__name__)
+        else:
+            failure.append("the phone stopped sending logs (disconnected?)")
+
+    async def drain() -> None:
+        try:
+            while True:
+                await ws.receive_text()
+        except WebSocketDisconnect:
+            return
+
+    reader = asyncio.create_task(read())
+    receiver = asyncio.create_task(drain())
+    try:
+        await ws.send_json({"type": "started"})
+        while not receiver.done():
+            await asyncio.sleep(_LIVE_FLUSH)
+            while batch:
+                chunk = batch[:_LIVE_BATCH]
+                del batch[:_LIVE_BATCH]
+                await ws.send_json({"type": "lines", "lines": chunk})
+            if reader.done():
+                await ws.send_json({"type": "error", "message": failure[0] if failure else "stopped"})
+                await ws.close()
+                break
+    except (WebSocketDisconnect, RuntimeError):
+        pass
+    finally:
+        reader.cancel()
+        receiver.cancel()
+        await asyncio.gather(reader, receiver, return_exceptions=True)
 
 
 # live events ----------------------------------------------------------------------

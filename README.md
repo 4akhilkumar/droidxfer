@@ -107,6 +107,20 @@ Settings and saved Wi-Fi endpoints are stored in `~/Library/Application Support/
 - If the phone misbehaves after a change, use **Restore all** (adb usually still works even if the phone keeps restarting). As a last resort, a factory reset restores every app.
 - Major system updates occasionally re-enable apps (Samsung more often than Google).
 
+### Reading the phone's log (troubleshooting)
+**Logs** (next to Apps) shows the phone's system log (logcat), so you can see what happened when something misbehaves. It needs USB debugging and is read-only.
+
+- **What just happened** reads what the phone has already stored (the last 1–60 minutes, or everything). Reproduce the problem, then open it: no need to start recording first. A busy phone writes hundreds of lines a second, so the phone stores roughly the last 15–30 minutes.
+- **Live** follows new lines as the phone writes them. **Stop** pauses; the newest 5,000 lines stay on screen.
+- Ready-made filters explain common events in plain words (shown as a note next to the line):
+  - **Headphones & media buttons**: what the headphones sent (Play, Pause, or a Play/Pause *toggle*), which app passed it on (e.g. the Google app for headphones with Google Assistant built in), and when playback changed. Useful when taking headphones off pauses at the wrong time.
+  - **Bluetooth connections**: connects, disconnects and drops.
+  - **App crashes & freezes**: crashes, "isn't responding" (ANR) and native crashes. Routine memory clean-up is left out.
+  - **Audio interruptions**: notification sounds, calls, alarms and the Assistant taking over the sound.
+- Narrow further by level (errors only, warnings...), one app (package name, e.g. `org.videolan.vlc`) or search text. Filters run on the phone first, so even a large log loads in a few seconds.
+- **Save…** writes the lines shown to a text file. Logs can contain personal details (device and contact names, account IDs). **Hide device addresses** (on by default) keeps only the last two bytes of Bluetooth and Wi-Fi addresses.
+- **Clear phone log** empties the phone's log (asks first). This is the only thing that changes anything on the phone.
+
 ### CLI
 ```bash
 uv run droidxfer devices
@@ -115,6 +129,10 @@ uv run droidxfer apps list --rating safe  # preinstalled apps rated safe to remo
 uv run droidxfer apps disable com.google.android.apps.tips --dry-run
 uv run droidxfer apps restore --all       # undo every change droidxfer made
 uv run droidxfer apps fetch-ratings       # download the community ratings list
+uv run droidxfer logs -p headphones -m 30 # headphone/media-button events from the last 30 minutes
+uv run droidxfer logs -f -l W             # follow warnings and errors live (Ctrl+C to stop)
+uv run droidxfer logs -a org.videolan.vlc --save vlc.txt
+uv run droidxfer logs --presets           # list the ready-made filters
 uv run droidxfer ls /sdcard/DCIM/Camera
 uv run droidxfer push ~/Pictures/trip /sdcard/Pictures --conflict rename
 uv run droidxfer pull /sdcard/DCIM/Camera ~/Downloads --verify
