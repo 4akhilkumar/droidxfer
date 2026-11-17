@@ -1584,3 +1584,106 @@ dialog.apps:not([open]) { display: none; }
   font-size: 12px;
   line-height: 1.4;
 }
+
+/* -------------------------------------------------------------- logs */
+dialog.logs {
+  width: min(1180px, 97vw);
+  height: min(900px, 94dvh);
+  max-height: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+dialog.logs:not([open]) { display: none; }
+
+.logs-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.logs-controls input[type="search"] { flex: 1 1 170px; min-width: 140px; }
+.logs-controls select[hidden] { display: none; }
+
+.segmented {
+  display: inline-flex;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.segmented button {
+  border: none;
+  background: var(--panel);
+  color: var(--muted);
+  padding: 5px 12px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.segmented button + button { border-left: 1px solid var(--border); }
+.segmented button:hover { color: var(--text); }
+.segmented button.active { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+
+.logs-preset-hint {
+  color: var(--muted);
+  font-size: 12px;
+  min-width: 0;
+}
+
+.logs-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+
+.logs-row {
+  display: grid;
+  grid-template-columns: 92px 16px minmax(80px, 170px) 1fr;
+  gap: 8px;
+  padding: 1px 8px;
+  border-bottom: 1px solid var(--border-subtle);
+}
+
+.logs-row:nth-child(even) { background: var(--row-alt); }
+.logs-row:hover { background: var(--row-hover); }
+.logs-time { color: var(--muted); font-variant-numeric: tabular-nums; }
+.logs-level { font-weight: 700; text-align: center; color: var(--muted); }
+.logs-tag { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--accent); }
+.logs-msg { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 0; }
+
+.logs-row.lvl-W .logs-level, .logs-row.lvl-W .logs-msg { color: var(--warn); }
+.logs-row.lvl-E .logs-level, .logs-row.lvl-E .logs-msg,
+.logs-row.lvl-F .logs-level, .logs-row.lvl-F .logs-msg { color: var(--danger); }
+
+.logs-row.has-note { box-shadow: inset 3px 0 0 var(--accent); }
+
+.logs-note {
+  display: inline-block;
+  margin-left: 8px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+  font-size: 11.5px;
+  white-space: normal;
+}
+
+.logs-status {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+@media (max-width: 640px) {
+  .logs-row { grid-template-columns: 80px 14px 1fr; }
+  .logs-tag { display: none; }
+}

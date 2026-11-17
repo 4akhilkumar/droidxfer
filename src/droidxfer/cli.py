@@ -514,3 +514,85 @@ async def apps_fetch_ratings() -> None:
 
 if __name__ == "__main__":
     app()
+
+
+# logs ----------------------------------------------------------------------------
+_LEVEL_STYLE = {"V": "dim", "D": "dim", "I": "", "W": "yellow", "E": "red", "F": "bold red"}
+
+
+def _print_log_line(line, notes_only: bool) -> None:
+    from rich.markup import escape
+
+    if notes_only and not line.note:
+        return
+    stamp = datetime.fromtimestamp(line.time).strftime("%H:%M:%S.%f")[:-3]
+    style = _LEVEL_STYLE.get(line.level, "")
+    msg = escape(line.message)
+    text = f"[dim]{stamp}[/dim] [{style or 'default'}]{line.level}[/] [cyan]{escape(line.tag)}[/cyan]: "
+    text += f"[{style}]{msg}[/]" if style else msg
+    if line.note:
+        text += f"  [bold blue]← {escape(line.note)}[/bold blue]"
+    console.print(text, highlight=False, soft_wrap=True)
+
+
+@app.command()
+@run_async
+async def logs(
+    device: DeviceOpt = None,
+    preset: Annotated[str | None, typer.Option("--preset", "-p", help="headphones | bluetooth | crashes | audio")] = None,
+    minutes: Annotated[int, typer.Option("--minutes", "-m", help="How far back to look (0 = everything stored).")] = 10,
+    level: Annotated[str, typer.Option("--level", "-l", help="Lowest level: V D I W E F")] = "V",
+    search: Annotated[str, typer.Option("--search", "-s", help="Only lines containing this text.")] = "",
+    app_pkg: Annotated[str | None, typer.Option("--app", "-a", help="Only one app (package name).")] = None,
+    follow: Annotated[bool, typer.Option("--follow", "-f", help="Keep printing new lines until Ctrl+C.")] = False,
+    limit: Annotated[int, typer.Option(help="Newest lines to show (not with --follow).")] = 5000,
+    notes_only: Annotated[bool, typer.Option("--notes-only", help="Only lines with a plain-words explanation.")] = False,
+    show_addresses: Annotated[bool, typer.Option("--show-addresses", help="Don't hide Bluetooth/Wi-Fi addresses.")] = False,
+    save: Annotated[Path | None, typer.Option("--save", help="Also write the lines to this text file.")] = None,
+    list_presets: Annotated[bool, typer.Option("--presets", help="List the ready-made filters and exit.")] = False,
+    clear: Annotated[bool, typer.Option("--clear", help="Empty the phone's log (asks first) and exit.")] = False,
+) -> None:
+    """Read the phone's system log (logcat), with ready-made filters that explain common events."""
+    from .core import logs as logcat
+
+    if list_presets:
+        for p in logcat.PRESETS.values():
+            console.print(f"[bold]{p.id}[/bold]  {p.label}\n    [dim]{p.description}[/dim]")
+        return
+    flt = logcat.LogFilter(preset=preset, min_level=level, query=search, app=app_pkg, mask=not show_addresses)
+    ctx = await _context()
+    try:
+        device_id = _pick_device(ctx, device)
+        if clear:
+            if typer.confirm("Empty the log stored on the phone? This can't be undone."):
+                await ctx.logs.clear(device_id)
+                console.print("Phone log cleared.")
+            return
+        out = save.open("w", encoding="utf-8") if save else None
+        try:
+            if follow:
+                console.print("[dim]Following the phone's log. Press Ctrl+C to stop.[/dim]")
+                try:
+                    async for line in ctx.logs.stream(device_id, flt):
+                        _print_log_line(line, notes_only)
+                        if out and (line.note or not notes_only):
+                            out.write(line.to_text() + "\n")
+                            out.flush()
+                except (KeyboardInterrupt, asyncio.CancelledError):
+                    pass
+            else:
+                res = await ctx.logs.dump(device_id, flt, minutes=minutes, limit=limit)
+                lines = [logcat.LogLine(**{k: v for k, v in d.items()}) for d in res["lines"]]
+                for line in lines:
+                    _print_log_line(line, notes_only)
+                if out:
+                    out.write(logcat.to_text([ln for ln in lines if ln.note or not notes_only]))
+                span = f"last {minutes} min" if minutes else "everything stored"
+                more = f" (newest {res['limit']} of {res['matched']})" if res["truncated"] else ""
+                console.print(f"[dim]{len(lines)} lines, {span}{more}.[/dim]")
+        finally:
+            if out:
+                out.close()
+                console.print(f"[dim]Saved to {save}[/dim]")
+    finally:
+        await ctx.stop()

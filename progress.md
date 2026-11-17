@@ -135,6 +135,21 @@ tests/        fake_adb.py (in-process fake adb server) + tests
   marks them preloaded_by="Samsung"; they count as preinstalled in filters and get a "removed completely" warning
   on uninstall. Live on the S25 (user-approved): Samsung Tips disabled via CLI, confirmed enabled=3, then
   `apps restore --all` re-enabled it; undo log recorded both. 110 tests passing.
+- Session 6 (2026-11-17): log viewer on branch feature/log-viewer, after diagnosing a WH-1000XM5 "pauses when
+  put on" bug by hand (cause: Google Assistant on the headphones relays wear events as a PLAY_PAUSE toggle via the
+  Google app; switching the Sony app's voice assistant to the phone's made the XM5 send real AVRCP PAUSE/PLAY).
+  core/logs.py: `logcat -v threadtime -v epoch`, buffers main,system,crash; dump = `logcat -d` with a time window
+  via `-T "$(($(date +%s)-N)).000"` computed on the phone; filterspec (`'*:W'`) must come after the options;
+  app filter = `--uid=` from `pm list packages --user 0 -U pkg` (plain `pm list packages -U` errors on user 150 =
+  Secure Folder). Presets (headphones/bluetooth/crashes/audio) grep on the phone first (toybox grep -E / -iF;
+  the S25 logs ~30k lines/min, 189k lines in 10 min) and re-filter in Python; explain() adds plain-words notes
+  (key events by sender, AVRCP play status 1=playing 2=paused, profile connection states, audio focus usages,
+  ANR/FATAL/died). adbd logs our own `logcat | grep` command, so adbd lines mentioning logcat are dropped (else
+  the headphones preset matched itself). "has died: cch/prev/..." = Android freeing memory, excluded from crashes.
+  Live = WebSocket /api/devices/{id}/logs/live (Python-side filtering; batches every 250 ms, capped), REST dump,
+  POST clear (`logcat -c`, confirmed in UI/CLI). Web: Logs dialog (web/js/logs.js); CLI: `droidxfer logs`.
+  MAC masking keeps the last 2 bytes, also when glued to text ("F1:26STATE_CONNECTED"). Verified on the S25 in the
+  browser (dump, headphones preset notes, live follow + stop) and CLI. 144 tests passing.
 
 ## Possible next steps / ideas
 - Rate the 31 remaining unknown S25 packages when documented.
