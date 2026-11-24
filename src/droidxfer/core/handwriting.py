@@ -25,6 +25,7 @@ log = logging.getLogger(__name__)
 
 OLLAMA_URL = "http://127.0.0.1:11434"
 MODES = ("auto", "vision", "gemma")
+OLLAMA_UNREACHABLE = "isn't reachable"  # part of the error when Ollama isn't running
 # Below this average confidence Auto asks Gemma. Measured on real S Pen handwriting: Vision said 0.73 while
 # getting 8 of ~30 words wrong, and Gemma 4 12b got them all; printed text scores 1.0.
 CONFIDENCE_FLOOR = 0.85
@@ -120,7 +121,7 @@ def _gemma(png: bytes, model: str, timeout: float = 240.0) -> Attempt:
         else:
             return Attempt("gemma", error=f"Ollama said {exc.code}: {detail}", ms=round((time.perf_counter() - start) * 1000))
     except (OSError, ValueError) as exc:
-        return Attempt("gemma", error=f"Ollama isn't reachable on {OLLAMA_URL} ({exc})",
+        return Attempt("gemma", error=f"Ollama {OLLAMA_UNREACHABLE} on {OLLAMA_URL} ({exc})",
                        ms=round((time.perf_counter() - start) * 1000))
     text = clean_model_text(data.get("response") or "")
     return Attempt(f"gemma:{model}", text, None, round((time.perf_counter() - start) * 1000))
@@ -168,6 +169,16 @@ def recognize_sync(png: bytes, mode: str = "auto", model: str = "gemma4:12b") ->
             raise RuntimeError("; ".join(errors))
         return Result("", None, None, total, attempts)
     return Result(chosen.text, chosen.engine, chosen.confidence, total, attempts)
+
+
+def read_vision(png: bytes) -> Attempt:
+    """One Vision pass (for the background search index)."""
+    return _vision(prepare(png))
+
+
+def read_gemma(png: bytes, model: str) -> Attempt:
+    """One Gemma pass (for the background search index)."""
+    return _gemma(prepare(png), model)
 
 
 async def recognize(png: bytes, mode: str = "auto", model: str = "gemma4:12b") -> Result:

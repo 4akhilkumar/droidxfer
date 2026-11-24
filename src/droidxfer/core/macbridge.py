@@ -117,6 +117,17 @@ def vision_available() -> bool:
     return sys.platform == "darwin" and not dyld_overrides()
 
 
+def on_ac_power() -> bool:
+    """True when the Mac runs on its power adapter (and on desktops, or when it can't be told)."""
+    if sys.platform != "darwin":
+        return True
+    try:
+        out = subprocess.run(["pmset", "-g", "batt"], capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return True
+    return "Battery Power" not in out
+
+
 def vision_recognize(png: bytes, languages: list[str] | None = None) -> list[TextLine]:
     """Recognize printed and handwritten text with Apple's on-device Vision framework."""
     try:

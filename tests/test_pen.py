@@ -7,6 +7,7 @@ from PIL import Image
 
 from droidxfer.api.app import create_app
 from droidxfer.core.context import AppContext
+from droidxfer.core.handwriting import Attempt, Result
 from droidxfer.core.notebooks import SNAPSHOT_EVERY, NoteError, NotebookStore, apply_op, blank_page
 from droidxfer.core.penrender import PageRenderer, page_to_svg, pages_to_pdf, stroke_width
 
@@ -471,3 +472,117 @@ def test_auto_asks_gemma_when_vision_is_only_fairly_sure(monkeypatch):
     monkeypatch.setattr(handwriting, "_post", lambda path, body, timeout: {"response": "I am 25 Yrs old"})
     r = handwriting.recognize_sync(png.getvalue(), "auto", "gemma4:12b")
     assert r.engine == "gemma:gemma4:12b" and r.text == "I am 25 Yrs old"
+
+
+# ------------------------------------------------------------------ background handwriting reading
+@pytest.fixture
+def reader(store, tmp_path, monkeypatch):
+    """A hub whose readers are fakes: Vision misreads "budget", Gemma gets it right."""
+    from droidxfer.core import handwriting, macbridge, penindex
+    from droidxfer.core.penpad import PenHub, PenSettings
+
+    calls = {"vision": 0, "gemma": 0}
+    fake = {"vision": Attempt("vision", "bugdet plan", 0.5),
+            "gemma": Attempt("gemma:gemma4:12b", "budget plan"), "power": True}
+
+    def vision(png):
+        calls["vision"] += 1
+        return fake["vision"]
+
+    def gemma(png, model):
+        calls["gemma"] += 1
+        return fake["gemma"]
+
+    monkeypatch.setattr(handwriting, "read_vision", vision)
+    monkeypatch.setattr(handwriting, "read_gemma", gemma)
+    monkeypatch.setattr(macbridge, "on_ac_power", lambda: fake["power"])
+    monkeypatch.setattr(penindex, "VISION_IDLE", 0.0)
+    monkeypatch.setattr(penindex, "GEMMA_IDLE", 0.0)
+    monkeypatch.setattr(penindex, "POWER_CHECK", 0.0)
+    hub = PenHub(None, None, None, store, PenSettings(tmp_path / "pen.json"))  # type: ignore[arg-type]
+    nb = store.create("Ideas")
+    page = nb.state["pages"][0]["id"]
+    nb.apply({"op": "add", "page": page, "objs": [stroke("a")]}, actor="pad")
+    hub.index.changed(nb.id, [page])
+    return hub, nb, page, calls, fake
+
+
+async def test_index_reads_with_vision_then_gemma_and_searches_both(reader):
+    hub, nb, page, calls, _ = reader
+    await hub.index.step()
+    assert calls == {"vision": 1, "gemma": 1}
+    hit = hub.search("budget")
+    assert hit and hit[0]["snippet"] == "budget plan"  # Gemma's reading is preferred for the snippet
+    assert hub.search("bugdet")  # Vision's reading still matches
+    await hub.index.step()
+    assert calls == {"vision": 1, "gemma": 1}  # an unchanged page is never read twice
+    nb.apply({"op": "add", "page": page, "objs": [stroke("b", y=300)]}, actor="pad")
+    hub.index.changed(nb.id, [page])
+    await hub.index.step()
+    assert calls == {"vision": 2, "gemma": 2}
+
+
+async def test_index_gemma_text_is_ignored_once_the_page_changes(reader):
+    hub, nb, page, calls, fake = reader
+    await hub.index.step()
+    fake["power"] = False  # Gemma can't refresh its reading now
+    nb.apply({"op": "add", "page": page, "objs": [stroke("b", y=300)]}, actor="pad")
+    hub.index.changed(nb.id, [page])
+    await hub.index.step()
+    assert not hub.search("budget") and hub.search("bugdet")
+
+
+async def test_index_follows_the_engine_setting(reader):
+    hub, nb, page, calls, fake = reader
+    hub.settings.update(hw_mode="vision")
+    await hub.index.step()
+    assert calls == {"vision": 1, "gemma": 0}
+    fake["vision"] = Attempt("vision", "bugdet plan", 0.97)
+    hub.settings.update(hw_mode="auto")
+    hub.index.changed(nb.id, [page])
+    hub.index._file(nb, page).unlink()
+    await hub.index.step()
+    assert calls == {"vision": 2, "gemma": 0}  # Auto: Vision was sure, so no Gemma
+    hub.settings.update(hw_mode="gemma")
+    hub.index.rescan_soon()
+    await hub.index.step()
+    assert calls == {"vision": 2, "gemma": 1}  # Gemma: every page gets a Gemma reading
+
+
+async def test_index_gemma_waits_for_power_ollama_and_the_user(reader):
+    hub, nb, page, calls, fake = reader
+    fake["power"] = False
+    await hub.index.step()
+    assert calls["gemma"] == 0 and hub.index.status()["paused"] == "battery"
+    assert hub.index.status()["gemma_pending"] == 1
+    fake["power"] = True
+    with hub.index.user_reading():
+        await hub.index.step()
+    assert calls["gemma"] == 0  # steps aside while the user reads a page
+    fake["gemma"] = Attempt("gemma", "", None, 0, "Ollama isn't reachable on http://127.0.0.1:11434 (refused)")
+    await hub.index.step()
+    assert calls["gemma"] == 1 and hub.index.status() == {
+        "mode": "auto", "gemma_pending": 1, "vision_pending": 0, "paused": "ollama"}
+    await hub.index.step()
+    assert calls["gemma"] == 1  # waits a while before trying Ollama again
+
+
+async def test_index_keeps_what_the_user_read(reader):
+    hub, nb, page, calls, _ = reader
+    pg = nb.state["pages"][0]
+    hub.index.remember(nb, pg, Result("budget plan", "gemma:gemma4:12b", None, 0, [
+        Attempt("vision", "bugdet plan", 0.5), Attempt("gemma:gemma4:12b", "budget plan")]))
+    hub.index.vision_queue.clear()
+    await hub.index.step()
+    assert calls == {"vision": 0, "gemma": 0} and hub.search("budget")
+
+
+def test_index_reads_old_records(store, tmp_path):
+    from droidxfer.core.penpad import PenHub, PenSettings
+
+    hub = PenHub(None, None, None, store, PenSettings(tmp_path / "pen.json"))  # type: ignore[arg-type]
+    nb = store.create("Old")
+    page = nb.state["pages"][0]["id"]
+    (nb.folder / "text").mkdir()
+    (nb.folder / "text" / f"{page}.json").write_text(json.dumps({"seq": 1, "text": "shopping list"}))
+    assert hub.search("shopping")[0]["page_no"] == 1

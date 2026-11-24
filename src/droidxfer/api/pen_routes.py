@@ -134,6 +134,8 @@ async def update_pen_settings(body: PenSettingsBody, ctx: AppContext = Ctx) -> d
         ctx.pen.settings.update(**changes)
     except macbridge.MacBridgeError as exc:
         raise HTTPException(400, str(exc)) from None
+    if {"hw_mode", "gemma_model"} & changes.keys():
+        ctx.pen.index.rescan_soon()  # pages may now need (another) Gemma reading
     return await pen_settings(ctx)
 
 
@@ -391,12 +393,18 @@ async def search(q: str = Query(min_length=1, max_length=200), ctx: AppContext =
     return await asyncio.to_thread(ctx.pen.search, q)
 
 
+@router.get("/search/status")
+async def search_status(ctx: AppContext = Ctx) -> dict:
+    return ctx.pen.index.status()
+
+
 @router.post("/notebooks/{notebook_id}/hw-compare")
 async def hw_compare(notebook_id: str, page: str | None = None, ctx: AppContext = Ctx) -> dict:
     nb = _nb(ctx, notebook_id)
     pg = ctx.pen.find_page(nb, page)
     png, _ = ctx.pen._ink_png(nb, pg, None)
-    return await asyncio.to_thread(handwriting.compare_sync, png, ctx.pen.settings["gemma_model"])
+    with ctx.pen.index.user_reading():
+        return await asyncio.to_thread(handwriting.compare_sync, png, ctx.pen.settings["gemma_model"])
 
 
 # ------------------------------------------------------------------ stickers

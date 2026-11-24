@@ -881,12 +881,31 @@ const textPanel = {
       this.out,
       el('h4', {}, 'Search all notebooks'),
       search, hits,
-      el('p', { class: 'hint' }, 'Handwriting is read in the background a few seconds after you stop writing (Apple Vision, on this Mac), so you can search it. Notebooks can be excluded from the notebook menu.'),
+      this.indexLine = el('p', { class: 'hint' }),
+      el('p', { class: 'hint' }, 'Handwriting is read in the background so you can search it: by Apple Vision a few seconds after you stop writing, then by Gemma when the engine is Gemma, or Auto and Vision wasn’t sure. Gemma reads one page at a time, only while the Mac is plugged in. Everything stays on this Mac. Notebooks can be excluded from the notebook menu.'),
       el('h4', {}, 'Which engine is better for my handwriting?'),
       el('button', { class: 'btn small', type: 'button', onclick: () => this.compare() }, 'Compare Vision and Gemma on this page'),
     );
     this.renderButtons();
     this.renderResult();
+    this.refreshIndex();
+  },
+  async refreshIndex() {
+    clearTimeout(this.indexTimer);
+    if (sideTab !== 'text' || !this.indexLine?.isConnected) return;
+    try {
+      const s = await get('/api/pen/search/status');
+      const n = s.gemma_pending;
+      const pages = `${n} page${n === 1 ? '' : 's'}`;
+      this.indexLine.textContent = s.mode === 'vision' ? ''
+        : s.paused === 'battery' && n ? `Improving search with Gemma: ${pages} waiting until the Mac is plugged in.`
+        : s.paused === 'ollama' && n ? `Gemma isn’t reachable (start the Ollama app), so ${pages} wait. Search uses Apple Vision’s reading meanwhile.`
+        : n ? `Improving search: ${pages} left to read with Gemma.`
+        : 'Search uses Gemma’s reading where it helps.';
+    } catch {
+      this.indexLine.textContent = '';
+    }
+    this.indexTimer = setTimeout(() => this.refreshIndex(), 5000);
   },
   renderButtons() {
     if (!this.buttons || sideTab !== 'text') return;
