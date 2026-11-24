@@ -59,13 +59,13 @@ export function recognizeShape(pts) {
   }
   ellipseErr /= n;
   rectErr /= n;
-  if (rectErr < 0.12 && rectErr < ellipseErr) {
+  if (rectErr < 0.14 && rectErr < ellipseErr) {
     const corners = [[x0, y0], [x1, y0], [x1, y1], [x0, y1], [x0, y0]];
     const out = [];
     for (let i = 0; i < 4; i += 1) out.push(...lerpPts(corners[i], corners[i + 1], 12, pressure).slice(i ? 1 : 0));
     return { kind: 'rectangle', pts: out };
   }
-  if (ellipseErr < 0.16) {
+  if (ellipseErr < 0.2) {
     const out = [];
     for (let i = 0; i <= 72; i += 1) {
       const a = (i / 72) * Math.PI * 2;

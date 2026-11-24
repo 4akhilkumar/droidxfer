@@ -223,10 +223,15 @@ def test_pad_token_scope(authed, client, fake_adb):
     token = client.ctx.pen.pad_token
 
     pad = TestClient(client.app, base_url=f"http://localhost:{PORT}")
-    r = pad.get(f"/pad?k={token}", follow_redirects=False)
+    nav = {"sec-fetch-site": "cross-site", "sec-fetch-mode": "navigate", "sec-fetch-dest": "document"}
+    r = pad.get(f"/pad?k={token}", follow_redirects=False, headers=nav)  # Chrome opened by `am start`
     assert r.status_code == 303 and f"droidxfer_pad_{PORT}=" in r.headers["set-cookie"]
     cookie = f"droidxfer_pad_{PORT}={token}"
     headers = {"cookie": cookie, "host": f"localhost:{PORT}"}
+    assert pad.get("/pad", headers=nav).status_code == 200
+    # cross-site is still refused for anything else
+    assert pad.get("/pen", headers=nav).status_code == 403
+    assert pad.post("/pad", headers=nav).status_code == 403
     # the pad token opens the pad's own endpoints only
     assert pad.get("/api/session", headers=headers).status_code == 401
     assert pad.get("/api/local/ls", params={"path": "~"}, headers=headers).status_code == 401
@@ -422,3 +427,22 @@ def test_apply_op_inverse_roundtrip():
         apply_op(state, inv)
         assert json.dumps(state, sort_keys=True) == snap
     assert SNAPSHOT_EVERY == 500
+
+
+def test_clean_model_text():
+    from droidxfer.core.handwriting import clean_model_text
+
+    raw = "```\nHi! I am Akhil.\n\nI am 25 Yrs old.\n\n~~Gen On Dec 3~~\non Dec 3rd $\\rightarrow$ **DOB**.\n```"
+    assert clean_model_text(raw) == "Hi! I am Akhil.\nI am 25 Yrs old.\non Dec 3rd -> DOB."
+
+
+def test_auto_asks_gemma_when_vision_is_only_fairly_sure(monkeypatch):
+    from droidxfer.core import handwriting, macbridge
+
+    png = io.BytesIO()
+    Image.new("RGB", (20, 20), "white").save(png, "PNG")
+    # real S Pen handwriting: Vision said 0.73 and was wrong on 8 of ~30 words
+    monkeypatch.setattr(macbridge, "vision_recognize", lambda data: [macbridge.TextLine("Jam 25 Ys old", 0.73, (0, 0, 1, 1))])
+    monkeypatch.setattr(handwriting, "_post", lambda path, body, timeout: {"response": "I am 25 Yrs old"})
+    r = handwriting.recognize_sync(png.getvalue(), "auto", "gemma4:12b")
+    assert r.engine == "gemma:gemma4:12b" and r.text == "I am 25 Yrs old"

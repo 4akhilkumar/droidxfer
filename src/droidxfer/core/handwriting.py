@@ -11,6 +11,7 @@ import base64
 import io
 import json
 import logging
+import re
 import time
 import urllib.error
 import urllib.request
@@ -24,11 +25,14 @@ log = logging.getLogger(__name__)
 
 OLLAMA_URL = "http://127.0.0.1:11434"
 MODES = ("auto", "vision", "gemma")
-CONFIDENCE_FLOOR = 0.6  # below this (average) Auto also asks Gemma
+# Below this average confidence Auto asks Gemma. Measured on real S Pen handwriting: Vision said 0.73 while
+# getting 8 of ~30 words wrong, and Gemma 4 12b got them all; printed text scores 1.0.
+CONFIDENCE_FLOOR = 0.85
 GEMMA_PROMPT = (
-    "Transcribe the handwritten text in this image exactly as written, keeping the line breaks. "
-    "Do not correct spelling, translate, describe drawings or add anything else. "
-    "Output only the transcribed text. If there is no text, output nothing."
+    "Transcribe the handwritten text in this image exactly as written, one line of output per written line. "
+    "Leave out words that are crossed out. Do not correct spelling, translate, describe drawings or add "
+    "anything else. Write plain text only: no Markdown, no LaTeX, no blank lines between lines; write an "
+    "arrow as ->. If there is no text, output nothing."
 )
 
 
@@ -118,10 +122,25 @@ def _gemma(png: bytes, model: str, timeout: float = 240.0) -> Attempt:
     except (OSError, ValueError) as exc:
         return Attempt("gemma", error=f"Ollama isn't reachable on {OLLAMA_URL} ({exc})",
                        ms=round((time.perf_counter() - start) * 1000))
-    text = (data.get("response") or "").strip()
+    text = clean_model_text(data.get("response") or "")
+    return Attempt(f"gemma:{model}", text, None, round((time.perf_counter() - start) * 1000))
+
+
+_LATEX = {r"\rightarrow": "->", r"\to": "->", r"\leftarrow": "<-", r"\times": "x", r"\%": "%"}
+
+
+def clean_model_text(text: str) -> str:
+    """Tidy a model's answer into plain text (it sometimes adds Markdown/LaTeX despite the prompt)."""
+    text = text.strip()
     if text.startswith("```"):
         text = text.strip("`").split("\n", 1)[-1].strip()
-    return Attempt(f"gemma:{model}", text, None, round((time.perf_counter() - start) * 1000))
+    text = re.sub(r"~~.*?~~", "", text)  # crossed-out words
+    text = re.sub(r"\$\s*(\\[a-zA-Z%]+)\s*\$", lambda m: _LATEX.get(m.group(1), ""), text)
+    for k, v in _LATEX.items():
+        text = text.replace(k, v)
+    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
+    lines = [re.sub(r"[ \t]+", " ", line).strip() for line in text.splitlines()]
+    return "\n".join(line for line in lines if line)
 
 
 def recognize_sync(png: bytes, mode: str = "auto", model: str = "gemma4:12b") -> Result:

@@ -48,7 +48,7 @@ const bar = el('div', { class: 'pad-bar' },
   el('button', { class: 'icon-btn', type: 'button', title: 'Menu', onclick: () => openMenu() }, svg('menu')),
   el('span', { class: 'sep' }),
   toolBtn('pen', 'Pen'), toolBtn('pencil', 'Pencil'), toolBtn('highlighter', 'Highlighter'),
-  toolBtn('eraser', 'Eraser (or hold the S Pen button)'), toolBtn('lasso', 'Lasso: select, move, copy, convert'),
+  toolBtn('eraser', 'Eraser (or click the S Pen button while hovering)'), toolBtn('lasso', 'Lasso: select, move, copy, convert'),
   toolBtn('laser', 'Laser pointer'),
   el('span', { class: 'sep' }),
   el('button', { class: 'icon-btn', type: 'button', title: 'Colour and size', onclick: () => openPalette() }, colorDot));
@@ -79,6 +79,20 @@ const ink = new InkCanvas(host, {
 });
 
 // ------------------------------------------------------------------ tools
+let beforeEraser = null;
+ink.onSideClick = () => {
+  if (prefs.tool === 'eraser') {
+    prefs.tool = beforeEraser || 'pen';
+    toast(`S Pen button: back to ${prefs.tool}`, 'info', 1200);
+  } else {
+    beforeEraser = prefs.tool;
+    prefs.tool = 'eraser';
+    toast('S Pen button: eraser (click again to switch back)', 'info', 1500);
+  }
+  setPref('tool', prefs.tool);
+  applyTool();
+};
+
 function chooseTool(tool) {
   if (tool === 'eraser' && prefs.tool === 'eraser') {
     prefs.eraser = prefs.eraser === 'stroke' ? 'partial' : 'stroke';
@@ -149,7 +163,7 @@ function openPalette() {
     seg([['stroke', 'Whole strokes'], ['partial', 'Only what I touch']], prefs.eraser, (v) => { prefs.eraser = v; setPref('eraser', v); applyTool(); }),
     el('h4', {}, 'Shapes'),
     seg([[true, 'Straighten when I hold still'], [false, 'Off']], prefs.snap, (v) => { prefs.snap = v; setPref('snap', v); applyTool(); }),
-    el('p', { class: 'hint' }, 'Hold the S Pen still at the end of a stroke to turn it into a straight line, rectangle or ellipse. Hold the S Pen button to erase. Tip: turn off Air command (Settings › Advanced features › S Pen) if pressing the button while hovering opens a menu.'));
+    el('p', { class: 'hint' }, 'Hold the S Pen still at the end of a stroke to turn it into a straight line, rectangle or ellipse. Click the S Pen button while hovering to switch to the eraser and back. If that opens Samsung\u2019s Air command menu instead, turn Air command off in Settings › Advanced features › S Pen.'));
 }
 
 const page = () => ink.page;

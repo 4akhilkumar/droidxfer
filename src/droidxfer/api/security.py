@@ -39,7 +39,13 @@ class SecurityMiddleware:
             await self._reject(scope, receive, send, 403, "invalid host header")
             return
         site = headers.get("sec-fetch-site")
-        if site and site not in ALLOWED_FETCH_SITES:
+        # The phone's browser is opened on /pad by `am start`, which Chrome reports as a cross-site
+        # navigation. Allow exactly that: a top-level GET of the (public) pad page or its token link.
+        pad_navigation = (
+            scope["type"] == "http" and scope["path"] == "/pad" and scope.get("method") == "GET"
+            and headers.get("sec-fetch-mode") == "navigate" and headers.get("sec-fetch-dest", "document") == "document"
+        )
+        if site and site not in ALLOWED_FETCH_SITES and not pad_navigation:
             await self._reject(scope, receive, send, 403, "cross-site request blocked")
             return
         origin = headers.get("origin")

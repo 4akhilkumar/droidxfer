@@ -195,7 +195,16 @@ tests/        fake_adb.py (in-process fake adb server) + tests
   outline (circles + same-winding quads) so thin lines have no dark joints; penrender.py mirrors widths.
 - Tests: tests/test_pen.py (20). Verified in the browser: Mac view + pad (phone-sized tab) sync, history
   preview/Changes, lasso/move/duplicate/undo, partial eraser, all side tabs, CLI export.
-- NOT yet verified on the real S25 Ultra: S Pen pressure/hover/side button in the phone browser, tablet mode
+- Live test on the S25 Ultra (Chrome 159, USB): pad opens after allowing Chrome's cross-site top-level GET of
+  /pad (am start counts as cross-site); pressure arrives (0..~0.56, now normalised to the max seen, ^0.8);
+  pencil tilt up to 0.71; hover = pointermove buttons 0 (~30 Hz). S Pen button + touch never reaches Chrome
+  (Samsung consumes it, then fires contextmenu); button while hovering = pointermove buttons 1, pressure 0 ->
+  used as a click-to-toggle eraser. Snapping failed on held circles because jitter reset the hold timer; now
+  measured from an anchor (7 px), thresholds ellipse 0.2 / rect 0.14 (all 10 real circles recognised, no
+  handwriting false positives). Handwriting on the user's page: Vision 0.7 s, ~8/30 words wrong at 0.73
+  confidence; gemma4:12b 7.5 s, all correct; gemma4:31b 32 s, all correct -> Auto floor 0.85, default 12b,
+  prompt + clean_model_text strip Markdown/LaTeX/crossed-out words.
+- Still to verify live: S Pen pressure/hover/side button in the phone browser, tablet mode
   with Accessibility allowed, handwriting benchmark on the user's own writing.
 
 ## Possible next steps / ideas

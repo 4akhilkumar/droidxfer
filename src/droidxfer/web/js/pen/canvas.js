@@ -207,6 +207,12 @@ export class InkCanvas {
     const [x, y] = toPage(this.view, sx, sy);
     let p = e.pressure;
     if (e.pointerType === 'mouse' || !p) p = 0.5;
+    else if (e.pointerType === 'pen') {
+      // Chrome on the S25 Ultra tops out around 0.56: stretch to the highest pressure seen so far,
+      // so a firm press reaches full width on any pen.
+      this.penMax = Math.max(this.penMax || 0.6, p);
+      p = Math.min(1, (p / this.penMax) ** 0.8);
+    }
     let tilt = 0;
     if (typeof e.altitudeAngle === 'number' && e.pointerType === 'pen') tilt = Math.max(0, 1 - e.altitudeAngle / (Math.PI / 2));
     else if (e.tiltX || e.tiltY) tilt = Math.min(1, Math.hypot(e.tiltX, e.tiltY) / 90);
@@ -275,6 +281,7 @@ export class InkCanvas {
       return;
     }
     if (!this.active) {
+      if (e.pointerType === 'pen') this.watchSideButton(e);
       if ((e.pointerType === 'pen' || e.pointerType === 'mouse') && this.page) this.hover(e);
       return;
     }
@@ -300,8 +307,25 @@ export class InkCanvas {
         last[2] = Math.max(last[2], pt[2]);
         return;
       }
-      if (d * this.view.s > 2.5) this.drawing.lastMove = performance.now();
+      // "holding still" is measured from where the hold began, so small pen jitter doesn't restart it
+      const anchor = this.drawing.anchor || last;
+      if (Math.hypot(pt[0] - anchor[0], pt[1] - anchor[1]) * this.view.s > 7) {
+        this.drawing.lastMove = performance.now();
+        this.drawing.anchor = pt;
+      }
       this.drawing.pts.push(pt);
+    }
+  }
+
+  // Samsung keeps "S Pen button + touch" for itself, so the browser never sees it. A quick click of the
+  // button while hovering does reach us (buttons goes 1 -> 0 with pressure 0): use it as a toggle.
+  watchSideButton(e) {
+    const held = (e.buttons & 3) !== 0 && !e.pressure;
+    if (held && !this.sideDown) this.sideDown = performance.now();
+    else if (!held && this.sideDown) {
+      const ms = performance.now() - this.sideDown;
+      this.sideDown = 0;
+      if (ms < 800) this.onSideClick?.();
     }
   }
 
