@@ -51,7 +51,7 @@ tests/        fake_adb.py (in-process fake adb server) + tests
 - [x] Live test on the real Pixel 7 Pro over USB (Android 17, serial 35091FDH3000EJ) — all passed (session 2)
 - [ ] Live test over Wi-Fi (QR / pairing code / tcpip) and USB->Wi-Fi failover by unplugging
 - [x] S Pen pad, notebooks + version history, handwriting to text, tablet mode (code + tests)
-- [ ] S Pen live test on the S25 Ultra (pressure, hover, side button, tablet mode, handwriting benchmark)
+- [x] S Pen live test on the S25 Ultra (pressure, hover, side button, tablet mode, handwriting benchmark)
 
 ## Key behaviours / gotchas (for future sessions)
 - Starlette TestClient WebSockets ignore base_url host and cookies -> tests pass `host`/`cookie` headers explicitly.
@@ -204,8 +204,8 @@ tests/        fake_adb.py (in-process fake adb server) + tests
   handwriting false positives). Handwriting on the user's page: Vision 0.7 s, ~8/30 words wrong at 0.73
   confidence; gemma4:12b 7.5 s, all correct; gemma4:31b 32 s, all correct -> Auto floor 0.85, default 12b,
   prompt + clean_model_text strip Markdown/LaTeX/crossed-out words.
-- Still to verify live: S Pen pressure/hover/side button in the phone browser, tablet mode
-  with Accessibility allowed, handwriting benchmark on the user's own writing.
+- Verified live afterwards: button-click eraser toggle, pressure up to 0.9, snapping, and tablet mode drawing in
+  Preview with pressure plus the shortcut buttons (Accessibility allowed for the Claude app that ran the server).
 
 ## Possible next steps / ideas
 - Rate the 31 remaining unknown S25 packages when documented.
