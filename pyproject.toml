@@ -14,6 +14,8 @@ dependencies = [
     "pillow-heif>=0.18",
     "pyusb>=1.2",
     "libusb-package>=1.0.26",
+    "pyobjc-framework-quartz>=11 ; sys_platform == 'darwin'",
+    "pyobjc-framework-vision>=11 ; sys_platform == 'darwin'",
 ]
 
 [project.scripts]

@@ -50,6 +50,8 @@ tests/        fake_adb.py (in-process fake adb server) + tests
 - [x] M6 Security hardening, tests (34 passing), README
 - [x] Live test on the real Pixel 7 Pro over USB (Android 17, serial 35091FDH3000EJ) — all passed (session 2)
 - [ ] Live test over Wi-Fi (QR / pairing code / tcpip) and USB->Wi-Fi failover by unplugging
+- [x] S Pen pad, notebooks + version history, handwriting to text, tablet mode (code + tests)
+- [x] S Pen live test on the S25 Ultra (pressure, hover, side button, tablet mode, handwriting benchmark)
 
 ## Key behaviours / gotchas (for future sessions)
 - Starlette TestClient WebSockets ignore base_url host and cookies -> tests pass `host`/`cookie` headers explicitly.
@@ -171,6 +173,39 @@ tests/        fake_adb.py (in-process fake adb server) + tests
   web/js/logs.js (tabs, adapters); Logs button no longer needs a phone. CLI: `logs` (phone; -r/-l/-q/-g/--tags)
   and new `activity`. Verified in the browser on the S25 (both tabs: search, histogram, patterns + highlight,
   expand, live tail both tabs, presets ~0.5 s). 183 tests passing.
+
+## S Pen pad (feature/spen-pad)
+- Plan approved by the user (S25 Ultra; tablet mode in scope; Vision first, Gemma 4 via local Ollama as
+  fallback; notes in ~/Documents/droidxfer Notes; Word/Excel-style version history). No Android app: the pad is
+  web/pad.html in the phone's browser, reached via `adb reverse tcp:P tcp:P` (AdbClient.reverse; adbd answers
+  OKAY(open)+OKAY(result)) and opened with `am start -a VIEW -d http://localhost:P/pad?k=<pad token>`.
+- core/notebooks.py: append-only history.jsonl of {seq, op, inv, actor, session, kind, label, pages}; snapshots
+  every 500; ops add/remove/move/update/page_*/pages_replace/batch/checkpoint; apply_op validates before
+  mutating (batch rolls back via inverses). Undo = apply inv as a new "undo" entry; redo = reapply op;
+  restore = page_replace/pages_replace (undoable). Shared undo stack (one user, two devices), in memory.
+- core/penpad.py PenHub: peers on /api/pen/ws (Mac, main cookie) and /api/pen/pad/ws (pad cookie
+  `droidxfer_pad_<port>`); everyone follows one notebook+page; live/hover/laser relayed only; ops deduped by
+  client cid (pad outbox in localStorage survives reconnects). Re-creates the reverse tunnel when the active
+  transport changes (USB<->Wi-Fi). Background Vision indexer writes <notebook>/text/<page>.json for search.
+- core/macbridge.py (pyobjc): clipboard PNG+TIFF, `screencapture -i`, Vision OCR, AX check via ctypes,
+  displays/front window via CGWindowList (no Screen Recording needed), CGEvent tablet proximity + tablet-point
+  mouse events with pressure/tilt, keyboard shortcuts. core/handwriting.py: auto/vision/gemma, Ollama
+  /api/generate with think:false. Measured: Vision 0.6 s, gemma4:12b 5.4 s on a printed-script test.
+- Web: js/pen/{model,render,canvas,shapes,net,icons,pad,view}.js + pen.css. Strokes render as one filled
+  outline (circles + same-winding quads) so thin lines have no dark joints; penrender.py mirrors widths.
+- Tests: tests/test_pen.py (20). Verified in the browser: Mac view + pad (phone-sized tab) sync, history
+  preview/Changes, lasso/move/duplicate/undo, partial eraser, all side tabs, CLI export.
+- Live test on the S25 Ultra (Chrome 159, USB): pad opens after allowing Chrome's cross-site top-level GET of
+  /pad (am start counts as cross-site); pressure arrives (0..~0.56, now normalised to the max seen, ^0.8);
+  pencil tilt up to 0.71; hover = pointermove buttons 0 (~30 Hz). S Pen button + touch never reaches Chrome
+  (Samsung consumes it, then fires contextmenu); button while hovering = pointermove buttons 1, pressure 0 ->
+  used as a click-to-toggle eraser. Snapping failed on held circles because jitter reset the hold timer; now
+  measured from an anchor (7 px), thresholds ellipse 0.2 / rect 0.14 (all 10 real circles recognised, no
+  handwriting false positives). Handwriting on the user's page: Vision 0.7 s, ~8/30 words wrong at 0.73
+  confidence; gemma4:12b 7.5 s, all correct; gemma4:31b 32 s, all correct -> Auto floor 0.85, default 12b,
+  prompt + clean_model_text strip Markdown/LaTeX/crossed-out words.
+- Verified live afterwards: button-click eraser toggle, pressure up to 0.9, snapping, and tablet mode drawing in
+  Preview with pressure plus the shortcut buttons (Accessibility allowed for the Claude app that ran the server).
 
 ## Possible next steps / ideas
 - Rate the 31 remaining unknown S25 packages when documented.

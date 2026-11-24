@@ -133,6 +133,25 @@ Settings and saved Wi-Fi endpoints are stored in `~/Library/Application Support/
 - **Clear phone log** empties the phone's log (asks first). This is the only thing that changes anything on the phone.
 - Logs can contain personal details (device and contact names, account IDs), so check a downloaded file before sharing it.
 
+### S Pen: draw on the phone, see it on the Mac
+Click **S Pen** in the top bar (or run `uv run droidxfer pen`). In the Pen page, pick the phone and click **Open pad on phone**. droidxfer opens a drawing pad in the phone's browser. Whatever you draw with the S Pen appears on the Mac as you draw. This needs USB debugging and works over USB or Wi-Fi.
+
+- **How it connects**: `adb reverse` makes `http://localhost:<port>` on the phone reach droidxfer, so the server still only listens on the Mac (`127.0.0.1`). The pad gets its own one-time link that only opens the pad, not your files. **Close pad** cancels it.
+- **Drawing**: only the S Pen draws, so a resting palm makes no marks. One finger scrolls, two fingers zoom, and a finger double-tap fits the page. Strokes respond to pressure, and the pencil also responds to tilt. Click the S Pen button while hovering to switch to the eraser and back (Samsung keeps "button + touch" for itself, so holding the button while drawing can't reach the browser). Tap the eraser again to switch between erasing whole strokes and erasing only what you touch. Hold the pen still at the end of a stroke to turn it into a straight line, rectangle or ellipse. The laser pointer shows a fading red trail on the Mac. If that click opens Samsung's Air command menu instead, turn Air command off in Settings › Advanced features › S Pen.
+- **Lasso**: select, then move, delete, recolour, duplicate, copy to the Mac clipboard as a picture, turn into text, or save as a signature or sticker to insert later.
+- **Notebooks**: pages can be blank, ruled, grid or dotted. Notebooks are saved as you draw in `~/Documents/droidxfer Notes/<notebook>/`. You can drop or paste pictures on the Mac page, or open any picture from the file panes with **Annotate with S Pen** in the viewer. **Annotate a Mac screenshot** lets you drag a box on the Mac's screen and draw on it. **Save annotated copy** puts `name (annotated).png` next to the original, on the Mac or the phone.
+- **Version history**: every change is kept, like the version history in Word or Excel on the web. Undo and redo work on both devices. The History tab groups changes by session and marks each one with the phone or Mac that made it. Click any entry to see the notebook as it was, then:
+  - **Changes** shows what was added since (green) and what was removed (red).
+  - **Side by side** shows that version next to now.
+  - **Copy selected to now** brings back only the parts you lasso.
+  - **Restore page** and **Restore whole notebook** are saved as new changes, so they can be undone too.
+
+  **Save version** adds a named checkpoint. **Replay page** plays the page back being drawn; the timelapse can also be exported as a GIF or MP4 (MP4 needs `brew install ffmpeg`).
+- **Export**: a page as PNG or SVG, the notebook as PDF, a page to the clipboard, or a page to the phone's gallery (Pictures › droidxfer Notes).
+- **Handwriting to text**: Apple Vision on the Mac is tried first (fast, offline). If it isn't confident, **Gemma 4** in your local Ollama reads the page instead. Nothing leaves the Mac. Settings has Auto, Vision only, Gemma only, and the Gemma model to use. **Compare Vision and Gemma on this page** shows both answers so you can pick the default. Handwriting is read in the background after you stop writing, so the **Search** box finds words you wrote. A notebook can be excluded from search from its menu.
+- **Tablet mode**: the S Pen moves the Mac's pointer and draws in any app, with pressure and tilt. Hovering moves the pointer, and the S Pen button right-clicks. The phone screen maps to a display or to the front window. The phone shows shortcut buttons (undo, brush size, eyedropper…) for the front app (Any app, Photoshop, Krita, Preview, Figma), and you can edit them in the Tablet tab. macOS must allow your terminal app under **System Settings › Privacy & Security › Accessibility**; restart droidxfer after allowing it. Annotating screenshots needs **Screen & System Audio Recording** in the same place.
+- Old history can be removed with **Settings › Compact** or `droidxfer notes compact`. By default everything is kept, because strokes take little space.
+
 ### CLI
 ```bash
 uv run droidxfer devices
@@ -155,6 +174,12 @@ uv run droidxfer qr                       # pair over Wi-Fi by scanning a QR cod
 uv run droidxfer pair 192.168.1.20:37099 123456
 uv run droidxfer connect 192.168.1.20:41235
 uv run droidxfer tcpip                    # switch a USB phone to Wi-Fi
+uv run droidxfer pen                      # web UI straight on the S Pen page
+uv run droidxfer notes list               # S Pen notebooks
+uv run droidxfer notes export "My notes" -o notes.pdf        # or -o page.png -p 2 / page.svg
+uv run droidxfer notes export "My notes" -o old.pdf --version 120   # an older version
+uv run droidxfer notes search "budget"    # search handwriting and typed text
+uv run droidxfer notes compact "My notes" --older-than 180
 ```
 
 ## Tests
@@ -164,4 +189,4 @@ uv run pytest
 The tests use an in-process fake adb server (`tests/fake_adb.py`), so no phone is needed.
 
 ## Security
-The server listens only on `127.0.0.1`. Access requires a random token for each run, stored in an HttpOnly, SameSite=Strict cookie. Requests with an unexpected Host, Origin or a cross-site `Sec-Fetch-Site` header are rejected. Mac paths are limited to your home folder and, if **Allow external drives** is on (the default), drives mounted under `/Volumes` (the boot disk's `/Volumes/Macintosh HD` link to `/` is not allowed). Protected locations on the phone (`/`, `/sdcard`, `/data`, ...) can't be deleted or renamed.
+The server listens only on `127.0.0.1`. Access requires a random token for each run, stored in an HttpOnly, SameSite=Strict cookie. Requests with an unexpected Host, Origin or a cross-site `Sec-Fetch-Site` header are rejected. Mac paths are limited to your home folder and, if **Allow external drives** is on (the default), drives mounted under `/Volumes` (the boot disk's `/Volumes/Macintosh HD` link to `/` is not allowed). Protected locations on the phone (`/`, `/sdcard`, `/data`, ...) can't be deleted or renamed. The S Pen pad reaches the server through `adb reverse` with its own short-lived token. That token only opens `/pad` and `/api/pen/pad/*` and is cancelled when the pad is closed. Other apps on the phone can reach the same localhost port while the pad is open, but they get nothing without a token.

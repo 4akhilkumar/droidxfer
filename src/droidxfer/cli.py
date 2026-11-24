@@ -139,6 +139,7 @@ def serve(
     port: Annotated[int, typer.Option(help="Port on 127.0.0.1")] = 8765,
     no_browser: Annotated[bool, typer.Option("--no-browser", help="Do not open the browser")] = False,
     verbose: Annotated[bool, typer.Option("--verbose", "-v")] = False,
+    page: Annotated[str, typer.Option(hidden=True)] = "",
 ) -> None:
     """Start the local web UI."""
     import uvicorn
@@ -147,12 +148,22 @@ def serve(
 
     _console_logging(verbose)
     token = secrets.token_urlsafe(24)
-    url = f"http://127.0.0.1:{port}/?token={token}"
+    url = f"http://127.0.0.1:{port}/?token={token}" + (f"&next={page}" if page else "")
     application = create_app(token=token, port=port)
     console.print(f"droidxfer running at [bold]{url}[/bold]\nPress Ctrl+C to stop.")
     if not no_browser:
         threading.Timer(1.0, webbrowser.open, [url]).start()
     uvicorn.run(application, host="127.0.0.1", port=port, log_level="info" if verbose else "warning")
+
+
+@app.command()
+def pen(
+    port: Annotated[int, typer.Option(help="Port on 127.0.0.1")] = 8765,
+    no_browser: Annotated[bool, typer.Option("--no-browser", help="Do not open the browser")] = False,
+    verbose: Annotated[bool, typer.Option("--verbose", "-v")] = False,
+) -> None:
+    """Start the web UI on the S Pen page (draw on the phone, see it on the Mac)."""
+    serve(port=port, no_browser=no_browser, verbose=verbose, page="/pen")
 
 
 @app.command()
@@ -675,3 +686,91 @@ async def activity(
     else:
         more = " (more with a larger --limit or a narrower --range)" if data["next_cursor"] else ""
         console.print(f"[dim]{len(data['entries'])} entries, range {range_}{more}. File: {data['file']['path']}[/dim]")
+
+
+# ------------------------------------------------------------------ S Pen notebooks
+notes_app = typer.Typer(help="S Pen notebooks: list, export, search and tidy up their history.", no_args_is_help=True)
+app.add_typer(notes_app, name="notes")
+
+
+def _store():
+    from .core.notebooks import NotebookStore
+
+    return NotebookStore()
+
+
+@notes_app.command("list")
+def notes_list() -> None:
+    """List notebooks (newest first)."""
+    store = _store()
+    table = Table("notebook", "pages", "changes", "last change")
+    for nb in store.list():
+        when = datetime.fromtimestamp(nb["updated"]).strftime("%d %b %Y %H:%M") if nb.get("updated") else "-"
+        table.add_row(nb["name"], str(nb["pages"]), str(nb["seq"]), when)
+    console.print(table)
+    console.print(f"[dim]Folder: {store.root}[/dim]")
+
+
+@notes_app.command("export")
+def notes_export(
+    notebook: Annotated[str, typer.Argument(help="Notebook name")],
+    out: Annotated[Path, typer.Option("--out", "-o", help="File to write (.pdf, or .png/.svg for one page)")],
+    page: Annotated[int, typer.Option("--page", "-p", help="Page number for PNG/SVG")] = 1,
+    version: Annotated[int | None, typer.Option("--version", help="Export an older version (history number)")] = None,
+) -> None:
+    """Export a notebook as PDF, or one page as PNG or SVG."""
+    from .core.notebooks import NoteError
+    from .core.penrender import PageRenderer, flatten, page_to_svg, pages_to_pdf, to_png
+
+    try:
+        nb = _store().get(notebook)
+        state = nb.state_at(nb.seq if version is None else version)
+        renderer = PageRenderer(nb.asset_path)
+        suffix = out.suffix.lower()
+        if suffix == ".pdf":
+            out.write_bytes(pages_to_pdf(renderer, state["pages"]))
+        else:
+            if not 1 <= page <= len(state["pages"]):
+                raise NoteError(f"the notebook has {len(state['pages'])} page(s)")
+            pg = state["pages"][page - 1]
+            if suffix == ".png":
+                out.write_bytes(to_png(flatten(renderer.render(pg, scale=2))))
+            elif suffix == ".svg":
+                out.write_text(page_to_svg(pg))
+            else:
+                raise NoteError("use a .pdf, .png or .svg file name")
+    except (KeyError, NoteError, OSError) as exc:
+        err.print(f"[red]Error:[/red] {exc.args[0] if isinstance(exc, KeyError) else exc}")
+        raise typer.Exit(1) from None
+    console.print(f"Saved {out}")
+
+
+@notes_app.command("search")
+def notes_search(query: Annotated[str, typer.Argument(help="Words to find in your handwriting and text")]) -> None:
+    """Search handwriting (as indexed by the web UI) and typed text in every notebook."""
+    from .core.penpad import PenHub
+
+    hub = PenHub(None, None, None, _store())  # type: ignore[arg-type]
+    hits = hub.search(query)
+    if not hits:
+        console.print("No matches.")
+        return
+    for h in hits:
+        console.print(f"[bold]{h['name']}[/bold] page {h['page_no']}: {h['snippet']}")
+
+
+@notes_app.command("compact")
+def notes_compact(
+    notebook: Annotated[str, typer.Argument(help="Notebook name")],
+    older_than: Annotated[float, typer.Option("--older-than", help="Days of history to keep")] = 90,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Don't ask")] = False,
+) -> None:
+    """Forget history older than N days (the notebook's content is kept)."""
+    try:
+        nb = _store().get(notebook)
+    except (KeyError, ValueError) as exc:
+        err.print(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from None
+    if not yes and not typer.confirm(f"Forget the history of {nb.name!r} older than {older_than:g} days?"):
+        raise typer.Exit(1)
+    console.print(f"Removed {nb.compact(older_than)} old change(s).")

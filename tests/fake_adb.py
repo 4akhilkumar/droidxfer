@@ -59,6 +59,7 @@ class FakeAdb:
         self.features = features
         self.port = 0
         self.shell_log: list[str] = []
+        self.reverses: dict[str, str] = {}
         self.mdns_text = ""
         self.fail_recv_after: int | None = None  # drop connection after N bytes of RECV data
         fp = "google/cheetah/cheetah:15/AP4A.250105.002/12701944:user/release-keys"
@@ -204,6 +205,16 @@ class FakeAdb:
                 elif svc.startswith("shell,v2,raw:"):
                     w.write(b"OKAY")
                     await self._shell(svc[len("shell,v2,raw:"):], w, r)
+                elif svc.startswith("reverse:forward:"):
+                    remote, _, local = svc[len("reverse:forward:"):].partition(";")
+                    self.reverses[remote] = local
+                    w.write(b"OKAYOKAY")
+                elif svc.startswith("reverse:killforward:"):
+                    remote = svc[len("reverse:killforward:"):]
+                    if self.reverses.pop(remote, None) is None:
+                        w.write(b"OKAYFAIL" + lp(f"listener '{remote}' not found"))
+                    else:
+                        w.write(b"OKAYOKAY")
                 elif svc.startswith("tcpip:"):
                     w.write(b"OKAY" + f"restarting in TCP mode port: {svc[6:]}\n".encode())
                 else:

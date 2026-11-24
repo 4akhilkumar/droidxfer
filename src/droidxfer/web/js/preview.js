@@ -4,7 +4,7 @@
 // new tab: that response carries a sandboxing CSP, which gives the tab an opaque origin, so the browser's
 // follow-up Range requests for video/audio would go out without the cookie and be rejected.
 
-import { el, extension, formatBytes, formatDate, icon } from './util.js';
+import { el, extension, formatBytes, formatDate, icon, toast } from './util.js';
 
 const NATIVE_IMAGE = new Set(['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'avif']);
 const CONVERTED_IMAGE = new Set(['heic', 'heif', 'tif', 'tiff']); // shown via a server-made JPEG
@@ -36,6 +36,10 @@ class PreviewViewer {
     this.prevBtn = btn('prev', 'Previous (←)', () => this.step(-1));
     this.nextBtn = btn('next', 'Next (→)', () => this.step(1));
     this.downloadLink = el('a', { class: 'btn small', title: 'Download this file' }, 'Download');
+    this.annotateBtn = el('button', {
+      class: 'btn small', type: 'button', title: 'Open this picture as a page to draw on with the S Pen (or the mouse)',
+      onclick: () => this.annotate(),
+    }, 'Annotate with S Pen');
     this.stage = el('div', { class: 'preview-stage' });
     this.dialog = el(
       'dialog',
@@ -46,6 +50,7 @@ class PreviewViewer {
         el('div', { class: 'preview-titles' }, this.titleEl, this.metaEl),
         this.prevBtn,
         this.nextBtn,
+        this.annotateBtn,
         this.downloadLink,
         btn('close', 'Close (Esc)', () => this.dialog.close()),
       ),
@@ -73,6 +78,21 @@ class PreviewViewer {
     this.index = Math.max(0, this.items.findIndex((e) => e.path === entry.path));
     if (!this.dialog.open) this.dialog.showModal();
     this.show();
+  }
+
+  async annotate() {
+    const entry = this.items[this.index];
+    if (!entry || !this.source.annotate) return;
+    this.annotateBtn.disabled = true;
+    try {
+      await this.source.annotate(entry.path);
+      window.open('/pen', 'droidxfer-pen');
+      toast('Opened in S Pen as a new page.', 'success');
+    } catch (err) {
+      toast(err.message, 'error');
+    } finally {
+      this.annotateBtn.disabled = false;
+    }
   }
 
   step(delta) {
@@ -109,6 +129,7 @@ class PreviewViewer {
     ].filter(Boolean).join(' · ');
     this.prevBtn.disabled = this.index === 0;
     this.nextBtn.disabled = this.index === this.items.length - 1;
+    this.annotateBtn.hidden = !(kind === 'image' || kind === 'converted') || !this.source.annotate;
     this.downloadLink.href = url;
     this.downloadLink.download = entry.name;
 

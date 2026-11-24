@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import secrets
 from http.cookies import SimpleCookie
+from typing import Callable
 from urllib.parse import parse_qs
 
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -13,10 +14,13 @@ ALLOWED_FETCH_SITES = {"same-origin", "none"}
 
 
 class SecurityMiddleware:
-    def __init__(self, app: ASGIApp, *, token: str, port: int) -> None:
+    def __init__(self, app: ASGIApp, *, token: str, port: int, pad_check: Callable[[str], bool] | None = None) -> None:
         self.app = app
         self.token = token
         self.cookie_name = f"droidxfer_{port}"
+        # The phone's S Pen pad gets its own short-lived token that only unlocks /pad and /api/pen/pad/*.
+        self.pad_cookie = f"droidxfer_pad_{port}"
+        self.pad_check = pad_check or (lambda _token: False)
         self.hosts = {f"127.0.0.1:{port}", f"localhost:{port}"}
         self.origins = {f"http://{h}" for h in self.hosts}
         ws = " ".join(f"ws://{h}" for h in sorted(self.hosts))
@@ -35,7 +39,13 @@ class SecurityMiddleware:
             await self._reject(scope, receive, send, 403, "invalid host header")
             return
         site = headers.get("sec-fetch-site")
-        if site and site not in ALLOWED_FETCH_SITES:
+        # The phone's browser is opened on /pad by `am start`, which Chrome reports as a cross-site
+        # navigation. Allow exactly that: a top-level GET of the (public) pad page or its token link.
+        pad_navigation = (
+            scope["type"] == "http" and scope["path"] == "/pad" and scope.get("method") == "GET"
+            and headers.get("sec-fetch-mode") == "navigate" and headers.get("sec-fetch-dest", "document") == "document"
+        )
+        if site and site not in ALLOWED_FETCH_SITES and not pad_navigation:
             await self._reject(scope, receive, send, 403, "cross-site request blocked")
             return
         origin = headers.get("origin")
@@ -48,12 +58,26 @@ class SecurityMiddleware:
             query = parse_qs(scope.get("query_string", b"").decode("latin-1"))
             if "token" in query:
                 if secrets.compare_digest(query["token"][0].encode(), self.token.encode()):
-                    await self._login(send)
+                    target = query.get("next", ["/"])[0]
+                    await self._login(send, location=target if target in ("/", "/pen") else "/")
                 else:
                     await self._reject(scope, receive, send, 403, "invalid token")
                 return
+        if scope["type"] == "http" and path == "/pad":
+            query = parse_qs(scope.get("query_string", b"").decode("latin-1"))
+            if "k" in query:
+                if self.pad_check(query["k"][0]):
+                    await self._login(send, self.pad_cookie, query["k"][0], "/pad")
+                else:
+                    await self._reject(scope, receive, send, 403, "this pen pad link has expired: start the pad again on the Mac")
+                return
 
-        if path.startswith("/api/") and not self._authenticated(headers.get("cookie", "")):
+        cookies = headers.get("cookie", "")
+        if path.startswith("/api/pen/pad/"):
+            if not (self._authenticated(cookies) or self._pad_authenticated(cookies)):
+                await self._reject(scope, receive, send, 401, "the pen pad link has expired: start the pad again on the Mac")
+                return
+        elif path.startswith("/api/") and not self._authenticated(cookies):
             await self._reject(scope, receive, send, 401, "not authenticated: open the URL printed by `droidxfer serve`")
             return
 
@@ -87,14 +111,23 @@ class SecurityMiddleware:
         morsel = jar.get(self.cookie_name)
         return bool(morsel) and secrets.compare_digest(morsel.value.encode(), self.token.encode())
 
-    async def _login(self, send: Send) -> None:
-        cookie = f"{self.cookie_name}={self.token}; HttpOnly; SameSite=Strict; Path=/"
+    def _pad_authenticated(self, cookie_header: str) -> bool:
+        jar = SimpleCookie()
+        try:
+            jar.load(cookie_header)
+        except Exception:
+            return False
+        morsel = jar.get(self.pad_cookie)
+        return bool(morsel) and self.pad_check(morsel.value)
+
+    async def _login(self, send: Send, name: str | None = None, value: str | None = None, location: str = "/") -> None:
+        cookie = f"{name or self.cookie_name}={value or self.token}; HttpOnly; SameSite=Strict; Path=/"
         await send(
             {
                 "type": "http.response.start",
                 "status": 303,
                 "headers": [
-                    (b"location", b"/"),
+                    (b"location", location.encode()),
                     (b"set-cookie", cookie.encode()),
                     (b"cache-control", b"no-store"),
                     (b"referrer-policy", b"no-referrer"),

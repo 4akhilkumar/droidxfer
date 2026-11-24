@@ -19,15 +19,20 @@ from ..mtp import LinkError, MtpError
 from ..core.apps import AppActionError
 from ..core.context import AppContext
 from ..core.devices import DeviceNotFound, DeviceUnavailable
+from ..core.macbridge import MacBridgeError
+from ..core.notebooks import NoteError
 from ..core.paths import PathError
 from ..core.remotefs import RemoteOpError
 from ..core.wireless import WirelessError
+from .pen_routes import router as pen_router
 from .routes import router
 from .security import SecurityMiddleware
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
 _STATUS: list[tuple[type[BaseException], int]] = [
+    (NoteError, 400),
+    (MacBridgeError, 409),
     (PathError, 400),
     (ValueError, 400),
     (NotADirectoryError, 400),
@@ -112,16 +117,27 @@ def create_app(*, token: str, port: int, context: AppContext | None = None, trac
         app.add_exception_handler(exc_type, _handler(status))
     app.add_exception_handler(Exception, _unexpected)
     app.include_router(router, prefix="/api")
+    app.include_router(pen_router, prefix="/api/pen")
+    ctx.pen.port = port
     # Assets live under a versioned prefix, so after an update the browser can't mix cached old files
     # with new ones (relative imports between the JS modules inherit the prefix).
     version = asset_version()
     static_prefix = f"/static/{version}"
     app.mount(static_prefix, RevalidatingStaticFiles(directory=WEB_DIR), name="static")
-    index_html = (WEB_DIR / "index.html").read_text().replace('"/static/', f'"{static_prefix}/')
+    pages = {name: (WEB_DIR / f"{name}.html").read_text().replace('"/static/', f'"{static_prefix}/')
+             for name in ("index", "pen", "pad")}
 
     @app.get("/", include_in_schema=False)
     async def index() -> HTMLResponse:
-        return HTMLResponse(index_html, headers={"Cache-Control": "no-store"})
+        return HTMLResponse(pages["index"], headers={"Cache-Control": "no-store"})
 
-    app.add_middleware(SecurityMiddleware, token=token, port=port)
+    @app.get("/pen", include_in_schema=False)
+    async def pen_page() -> HTMLResponse:
+        return HTMLResponse(pages["pen"], headers={"Cache-Control": "no-store"})
+
+    @app.get("/pad", include_in_schema=False)
+    async def pad_page() -> HTMLResponse:
+        return HTMLResponse(pages["pad"], headers={"Cache-Control": "no-store"})
+
+    app.add_middleware(SecurityMiddleware, token=token, port=port, pad_check=ctx.pen.check_pad_token)
     return app
