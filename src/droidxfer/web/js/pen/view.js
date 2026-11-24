@@ -374,11 +374,47 @@ function pageMenu(anchor, id) {
     ['-'],
     ...[['blank', 'Blank paper'], ['ruled', 'Ruled paper'], ['grid', 'Grid paper'], ['dot', 'Dotted paper']].map(([t, label]) => [label, () => sock.sendOp({ op: 'page_update', id, template: t }), page.template === t ? '✓' : '']),
     ['-'],
-    ['Delete page', () => {
-      if (state.pages.length <= 1) toast('A notebook needs at least one page.');
-      else sock.sendOp({ op: 'page_remove', id });
-    }],
+    ['Delete page', () => deletePage(id)],
   ]);
+}
+
+const PAPERS = [['blank', 'Blank'], ['ruled', 'Ruled'], ['grid', 'Grid'], ['dot', 'Dots']];
+
+// Deleting the only page: ask which paper the fresh page should have, then replace it.
+function choosePaper(current) {
+  return new Promise((resolve) => {
+    let picked = null;
+    const dlg = el('dialog', { class: 'sheet', style: { position: 'fixed', inset: '0', margin: 'auto', width: '400px', height: 'fit-content' } });
+    const choices = el('div', { class: 'paper-choices' }, PAPERS.map(([v, label]) => el('button', {
+      class: `btn${v === current ? ' primary' : ''}`, type: 'button', onclick: () => { picked = v; dlg.close(); },
+    }, label)));
+    dlg.append(
+      el('h3', {}, 'Delete the last page?'),
+      el('p', { class: 'hint' }, 'This is the only page, so a new empty page takes its place. Choose its paper. Undo brings the deleted page back.'),
+      choices,
+      el('div', { class: 'row', style: { justifyContent: 'flex-end', marginTop: '14px' } },
+        el('button', { class: 'btn', type: 'button', onclick: () => dlg.close() }, 'Cancel')),
+    );
+    dlg.addEventListener('close', () => { dlg.remove(); resolve(picked); });
+    document.body.append(dlg);
+    dlg.showModal();
+    choices.querySelector('.primary')?.focus();
+  });
+}
+
+async function deletePage(id) {
+  const old = state.pages.find((p) => p.id === id);
+  if (!old) return;
+  if (state.pages.length > 1) {
+    sock.sendOp({ op: 'page_remove', id });
+    return;
+  }
+  const template = await choosePaper(old.template);
+  if (!template || !state.pages.some((p) => p.id === id)) return;
+  const fresh = { id: newId(), w: old.bg ? 1000 : old.w, h: old.bg ? 1414 : old.h, template, bg: null, objs: {}, order: [] };
+  pendingPage = fresh.id;
+  // One batch, so a single undo restores the old page: add the new page first, then remove the old one.
+  sock.sendOp({ op: 'batch', ops: [{ op: 'page_add', page: fresh, index: 1 }, { op: 'page_remove', id }] });
 }
 
 let pendingPage = null;

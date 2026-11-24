@@ -414,6 +414,11 @@ def describe(op: dict, state: dict) -> str:
     if kind == "batch":
         subs = op["ops"]
         kinds = {s.get("op") for s in subs}
+        if kinds == {"page_add", "page_remove"} and len(subs) == 2:  # the only page swapped for a new empty one
+            removed = next(s for s in subs if s["op"] == "page_remove")["id"]
+            added = next(s for s in subs if s["op"] == "page_add")["page"]
+            paper = {"blank": "blank", "ruled": "ruled", "grid": "grid", "dot": "dotted"}.get(added.get("template"), "blank")
+            return f"Deleted {page_no(removed)} and started a new {paper} page"
         if kinds <= {"add", "remove"} and len(subs) >= 2:
             page = subs[0].get("page")
             return f"Erased part of {_count(sum(len(s['ids']) for s in subs if s['op'] == 'remove'), 'stroke')} on {page_no(page)}"

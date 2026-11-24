@@ -378,8 +378,8 @@ class PenHub:
                "can_undo": bool(nb.undo_stack), "can_redo": bool(nb.redo_stack)}
         if cid:
             msg["cid"] = cid
-        if entry.op.get("op") in ("page_remove", "pages_replace", "page_replace") and not any(
-                p["id"] == self.current.get("page") for p in nb.state["pages"]):
+        # Any change (a page delete, a batch that swaps the last page, an undo...) can remove the current page.
+        if not any(p["id"] == self.current.get("page") for p in nb.state["pages"]):
             self.current["page"] = nb.state["pages"][0]["id"]
         msg["current"] = self.current
         self.broadcast(msg)

@@ -255,11 +255,24 @@ function openPaper() {
 }
 
 function deletePage() {
+  const old = page();
+  if (!old) return;
   if (state.pages.length <= 1) {
-    toast('A notebook needs at least one page.');
+    // The only page: ask which paper the new empty page gets, then swap them in one undoable change.
+    sheet('Delete the last page?',
+      el('p', { class: 'hint' }, 'This is the only page, so a new empty page takes its place. Choose its paper. Undo brings the deleted page back.'),
+      el('div', { class: 'menu-list' }, [['blank', 'Blank'], ['ruled', 'Ruled'], ['grid', 'Grid'], ['dot', 'Dots']].map(([v, label]) =>
+        el('button', { class: `menu-item${old.template === v ? ' on' : ''}`, type: 'button', onclick: () => {
+          closeSheet();
+          if (!state.pages.some((p) => p.id === old.id)) return;
+          const fresh = { id: newId(), w: old.bg ? 1000 : old.w, h: old.bg ? 1414 : old.h, template: v, bg: null, objs: {}, order: [] };
+          pendingPage = fresh.id;
+          sock.sendOp({ op: 'batch', ops: [{ op: 'page_add', page: fresh, index: 1 }, { op: 'page_remove', id: old.id }] });
+          toast('Page deleted. Undo brings it back.');
+        } }, label))));
     return;
   }
-  sock.sendOp({ op: 'page_remove', id: page().id });
+  sock.sendOp({ op: 'page_remove', id: old.id });
   toast('Page deleted. Undo brings it back.');
 }
 

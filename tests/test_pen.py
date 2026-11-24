@@ -273,6 +273,31 @@ def ws_headers():
     return {"cookie": f"droidxfer_{PORT}={TOKEN}", "host": f"127.0.0.1:{PORT}"}
 
 
+
+def test_delete_last_page_swaps_in_a_new_page(store):
+    nb = store.create("Last page")
+    old = nb.state["pages"][0]["id"]
+    nb.apply({"op": "add", "page": old, "objs": [stroke("a")]}, actor="pad")
+    fresh = blank_page("grid")
+    entry = nb.apply({"op": "batch", "ops": [{"op": "page_add", "page": fresh, "index": 1},
+                                             {"op": "page_remove", "id": old}]}, actor="mac")
+    assert entry.label == "Deleted page 1 and started a new grid page"
+    assert [(p["id"], p["template"], p["order"]) for p in nb.state["pages"]] == [(fresh["id"], "grid", [])]
+    nb.undo("mac")  # one undo brings the old page back, with its drawing
+    assert [(p["id"], p["order"]) for p in nb.state["pages"]] == [(old, ["a"])]
+    with pytest.raises(NoteError):  # a plain delete of the only page is still refused
+        nb.apply({"op": "page_remove", "id": old}, actor="mac")
+
+
+def test_live_current_page_follows_last_page_swap(authed):
+    with authed.websocket_connect("/api/pen/ws", headers=ws_headers()) as mac:
+        old = mac.receive_json()["current"]["page"]
+        fresh = blank_page("ruled")
+        mac.send_json({"t": "op", "cid": "c1", "op": {"op": "batch", "ops": [
+            {"op": "page_add", "page": fresh, "index": 1}, {"op": "page_remove", "id": old}]}})
+        applied = recv(mac)
+        assert applied["t"] == "applied" and applied["current"]["page"] == fresh["id"]
+
 def test_live_flow_two_peers(authed):
     with authed.websocket_connect("/api/pen/ws", headers=ws_headers()) as mac, \
             authed.websocket_connect("/api/pen/ws", headers=ws_headers()) as pad:

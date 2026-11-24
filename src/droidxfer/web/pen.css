@@ -252,5 +252,6 @@ body.mac-pen { display: grid; grid-template-rows: auto minmax(0, 1fr); height: 1
 .present .close { position: absolute; right: 14px; top: 14px; z-index: 5; color: #fff; }
 .menu-pop { position: absolute; z-index: 40; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); padding: 4px; min-width: 200px; }
 .menu-pop .menu-item { font-size: 13px; padding: 8px 10px; }
+.paper-choices { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 12px; }
 .stage:fullscreen, .stage:fullscreen .ink-host { background: #000; }
 .stage:fullscreen .banner, .stage:fullscreen .selbar { display: none; }
