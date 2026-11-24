@@ -20,6 +20,7 @@ import hashlib
 import json
 import logging
 import time
+import unicodedata
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -35,6 +36,11 @@ VISION_IDLE = 4.0  # seconds after the last change before Vision reads a page
 GEMMA_IDLE = 20.0  # seconds a page must be left alone before Gemma reads it
 OLLAMA_RETRY = 300.0  # seconds to wait after Ollama wasn't reachable
 POWER_CHECK = 60.0  # seconds between power adapter checks
+
+
+def norm(text: str) -> str:
+    """For matching: the same letters (Telugu, Hindi...) can be typed as different code point sequences."""
+    return unicodedata.normalize("NFC", text).casefold()
 
 
 def ink_fingerprint(page: dict) -> str:
@@ -67,6 +73,10 @@ class HandwritingIndex:
         self._ollama_retry_at = 0.0
         self._power: tuple[float, bool] = (-POWER_CHECK, True)
         self._rescan = True
+
+    def _wants_gemma(self, record: dict, fp: str) -> bool:
+        st = self.hub.settings
+        return needs_gemma(record, fp, st["hw_mode"], st["gemma_model"])
 
     # ------------------------------------------------------------------ records
     @staticmethod
@@ -104,7 +114,6 @@ class HandwritingIndex:
         self._rescan = True
 
     def _scan(self) -> None:
-        mode, model = self.hub.settings["hw_mode"], self.hub.settings["gemma_model"]
         current = self.hub.current.get("notebook")
         infos = sorted(self.hub.store.list(), key=lambda i: i["id"] != current)  # the open notebook first
         for info in infos:
@@ -117,7 +126,7 @@ class HandwritingIndex:
                 record = self.load(nb, page["id"])
                 if (record.get("vision") or {}).get("fp") != fp:
                     self.vision_queue.setdefault(key, 0.0)
-                elif needs_gemma(record, fp, mode, model):
+                elif self._wants_gemma(record, fp):
                     self.gemma_queue.setdefault(key, 0.0)
                 else:
                     self.gemma_queue.pop(key, None)
@@ -152,7 +161,7 @@ class HandwritingIndex:
                     data["error"] = attempt.error
         self._save(nb, page["id"], "vision", data)
         key = (nb.id, page["id"])
-        if needs_gemma(self.load(nb, page["id"]), fp, self.hub.settings["hw_mode"], self.hub.settings["gemma_model"]):
+        if self._wants_gemma(self.load(nb, page["id"]), fp):
             self.gemma_queue[key] = time.monotonic()
         else:
             self.gemma_queue.pop(key, None)
@@ -173,6 +182,14 @@ class HandwritingIndex:
         if attempt.error:  # e.g. the model isn't installed: don't retry until the page or setting changes
             data["error"] = attempt.error
             log.warning("Gemma couldn't read %s/%s: %s", nb.id, page["id"], attempt.error)
+        elif handwriting.needs_translation(attempt.text):  # so an English search finds Telugu, Hindi... writing
+            tr = await asyncio.to_thread(handwriting.translate_sync, attempt.text, "English", model)
+            if tr.error and handwriting.OLLAMA_UNREACHABLE in tr.error:
+                return False
+            if tr.error:
+                log.warning("Gemma couldn't translate %s/%s: %s", nb.id, page["id"], tr.error)
+            else:
+                data["translation"] = tr.text
         if ink_fingerprint(page) == fp:  # the page didn't change while Gemma was reading
             self._save(nb, page["id"], "gemma", data)
         return True
@@ -180,16 +197,20 @@ class HandwritingIndex:
     def remember(self, nb: Notebook, page: dict, result: handwriting.Result) -> None:
         """Keep the result of a "Read this page" the user asked for, so the background needn't read it again."""
         fp = ink_fingerprint(page)
+        model = self.hub.settings["gemma_model"]
         for attempt in result.attempts:
             if attempt.error:
                 continue
             if attempt.engine == "vision":
                 self._save(nb, page["id"], "vision", {"fp": fp, "text": attempt.text, "confidence": attempt.confidence})
-            elif attempt.engine == f"gemma:{self.hub.settings['gemma_model']}":
-                self._save(nb, page["id"], "gemma", {"fp": fp, "model": self.hub.settings["gemma_model"],
-                                                     "text": attempt.text})
-        if not needs_gemma(self.load(nb, page["id"]), fp, self.hub.settings["hw_mode"],
-                           self.hub.settings["gemma_model"]):
+            elif attempt.engine == f"gemma:{model}":
+                data = {"fp": fp, "model": model, "text": attempt.text}
+                if handwriting.needs_translation(attempt.text):
+                    if result.translation is None:
+                        continue  # the translation failed: let the background try again
+                    data["translation"] = result.translation
+                self._save(nb, page["id"], "gemma", data)
+        if not self._wants_gemma(self.load(nb, page["id"]), fp):
             self.gemma_queue.pop((nb.id, page["id"]), None)
 
     @contextlib.contextmanager
@@ -255,8 +276,7 @@ class HandwritingIndex:
             self.gemma_queue.pop(key, None)
             return
         nb, page = found
-        if not needs_gemma(self.load(nb, page["id"]), ink_fingerprint(page), self.hub.settings["hw_mode"],
-                           self.hub.settings["gemma_model"]):
+        if not self._wants_gemma(self.load(nb, page["id"]), ink_fingerprint(page)):
             self.gemma_queue.pop(key, None)
             return
         try:
@@ -278,12 +298,13 @@ class HandwritingIndex:
             await asyncio.sleep(2)
 
     def status(self) -> dict:
-        return {"mode": self.hub.settings["hw_mode"], "gemma_pending": len(self.gemma_queue),
+        return {"mode": self.hub.settings["hw_mode"], "model": self.hub.settings["gemma_model"],
+                "gemma_pending": len(self.gemma_queue),
                 "vision_pending": len(self.vision_queue), "paused": self.paused}
 
     # ------------------------------------------------------------------ search
     def search(self, query: str, limit: int = 50) -> list[dict]:
-        words = [w.lower() for w in query.split() if w.strip()]
+        words = [norm(w) for w in query.split() if w.strip()]
         if not words:
             return []
         hits = []
@@ -294,22 +315,25 @@ class HandwritingIndex:
             for index, page in enumerate(nb.state["pages"]):
                 record = self.load(nb, page["id"])
                 gemma = record.get("gemma") or {}
-                texts = [t for t in (
-                    # Gemma's reading only while it matches the page (old text could hold erased words)
-                    gemma.get("text") if gemma.get("fp") == ink_fingerprint(page) else None,
+                current = gemma.get("fp") == ink_fingerprint(page)  # old text could hold erased words
+                written = [t for t in (
+                    gemma.get("text") if current else None,
                     (record.get("vision") or {}).get("text"),
                     *[o["text"] for o in page["objs"].values() if o["type"] == "text"],
                 ) if t]
-                low_texts = [t.lower() for t in texts]
-                if not all(any(w in t for t in low_texts) for w in words):
+                translation = gemma.get("translation") if current else None
+                texts = [(norm(t), t) for t in written] + ([(norm(translation), translation)] if translation else [])
+                if not all(any(w in low for low, _ in texts) for w in words):
                     continue
-                # the snippet comes from the first (best) text that has the first word
-                text, low = next((t, lt) for t, lt in zip(texts, low_texts) if words[0] in lt)
+                # the snippet comes from the first (best) text that has the first word; the translation is last
+                index_hit = next(i for i, (low, _) in enumerate(texts) if words[0] in low)
+                low, text = texts[index_hit]
+                via = "translation" if index_hit >= len(written) else "writing"
                 at = low.find(words[0])
                 start = max(0, at - 60)
                 snippet = text[start: at + 100].replace("\n", " ")
                 hits.append({"notebook": nb.id, "name": nb.name, "page": page["id"], "page_no": index + 1,
-                             "snippet": ("…" if start else "") + snippet})
+                             "snippet": ("…" if start else "") + snippet, "via": via})
                 if len(hits) >= limit:
                     return hits
         return hits

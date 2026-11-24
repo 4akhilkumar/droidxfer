@@ -868,7 +868,7 @@ const textPanel = {
         try {
           const res = await get(`/api/pen/search?${qs({ q })}`);
           put(hits, ...(res.length ? res.map((h) => el('button', { class: 'search-hit', type: 'button', onclick: () => openHit(h) },
-            el('div', {}, el('b', {}, h.name), ` · page ${h.page_no}`), el('div', { class: 's' }, h.snippet))) : [el('p', { class: 'hint' }, 'No matches.')]));
+            el('div', {}, el('b', {}, h.name), ` · page ${h.page_no}`), el('div', { class: 's' }, h.via === 'translation' ? `English translation: ${h.snippet}` : h.snippet))) : [el('p', { class: 'hint' }, 'No matches.')]));
         } catch (err) {
           put(hits, el('p', { class: 'hint' }, err.message));
         }
@@ -935,23 +935,52 @@ const textPanel = {
     const r = this.result;
     if (!r || !this.out) return;
     const engine = (name) => (name?.startsWith('gemma') ? `Gemma (${name.slice(6)})` : 'Apple Vision');
-    const text = el('textarea', { class: 'result-text', style: { width: '100%', minHeight: '120px' } });
-    text.value = r.text;
     const page = ink.page;
     const area = unionBounds((this.ids || page.order).map((id) => page.objs[id]).filter((o) => o?.type === 'stroke')) || [40, 40, 440, 100];
-    const textObj = () => ({ id: newId(), type: 'text', text: text.value, color: '#1d1d1f', size: 28, x: area[0], w: Math.max(200, area[2] - area[0]) });
-    put(this.out, 
+    const textObj = (value) => ({ id: newId(), type: 'text', text: value, color: '#1d1d1f', size: 28, x: area[0], w: Math.max(200, area[2] - area[0]) });
+    const box = (value) => {
+      const t = el('textarea', { class: 'result-text', style: { width: '100%', minHeight: '120px' } });
+      t.value = value;
+      return t;
+    };
+    // Copy and Insert below for any text box (the reading or a translation)
+    const actions = (t, extra = []) => el('div', { class: 'row' },
+      el('button', { class: 'btn small', type: 'button', onclick: () => navigator.clipboard.writeText(t.value).then(() => toast('Copied', 'success')) }, 'Copy'),
+      el('button', { class: 'btn small', type: 'button', onclick: () => sock.sendOp({ op: 'add', page: page.id, objs: [{ ...textObj(t.value), y: area[3] + 10 }] }) }, 'Insert below'),
+      ...extra);
+    const text = box(r.text);
+    const nodes = [
       r.text ? text : el('p', { class: 'hint' }, 'No text found.'),
       el('p', { class: 'hint' }, r.engine ? `${engine(r.engine)}${r.confidence != null ? ` · ${Math.round(r.confidence * 100)}% sure` : ''} · ${(r.ms / 1000).toFixed(1)} s` : ''),
       r.attempts.length > 1 ? el('p', { class: 'hint' }, `Tried: ${r.attempts.map((a) => `${engine(a.engine)} (${a.error ? 'failed' : `${(a.ms / 1000).toFixed(1)} s`})`).join(', ')}`) : null,
-      r.text ? el('div', { class: 'row' },
-        el('button', { class: 'btn small', type: 'button', onclick: () => navigator.clipboard.writeText(text.value).then(() => toast('Copied', 'success')) }, 'Copy'),
-        el('button', { class: 'btn small', type: 'button', onclick: () => sock.sendOp({ op: 'add', page: page.id, objs: [{ ...textObj(), y: area[3] + 10 }] }) }, 'Insert below'),
-        el('button', { class: 'btn small', type: 'button', onclick: () => {
-          const strokes = (this.ids || page.order).filter((id) => page.objs[id]?.type === 'stroke');
-          sock.sendOp({ op: 'batch', ops: [{ op: 'remove', page: page.id, ids: strokes }, { op: 'add', page: page.id, objs: [{ ...textObj(), y: area[1] }] }] });
-        } }, 'Replace handwriting')) : null,
-    );
+    ];
+    if (r.text) {
+      nodes.push(actions(text, [el('button', { class: 'btn small', type: 'button', onclick: () => {
+        const strokes = (this.ids || page.order).filter((id) => page.objs[id]?.type === 'stroke');
+        sock.sendOp({ op: 'batch', ops: [{ op: 'remove', page: page.id, ids: strokes }, { op: 'add', page: page.id, objs: [{ ...textObj(text.value), y: area[1] }] }] });
+      } }, 'Replace handwriting')]));
+      if (r.translation) {
+        const tr = box(r.translation);
+        nodes.push(el('h4', {}, 'English translation'), tr, actions(tr));
+      }
+      // other languages on demand (one quick Gemma request, no image)
+      const target = el('select', { class: 'input' }, ['English', 'Malayalam', 'Tamil', 'Japanese', 'Hindi'].map((l) => new Option(l, l)));
+      const translated = el('div', { class: 'stack' });
+      const go = el('button', { class: 'btn small', type: 'button', onclick: async () => {
+        go.disabled = true;
+        put(translated, el('p', { class: 'hint' }, `Translating into ${target.value}…`));
+        try {
+          const res = await post('/api/pen/translate', { text: text.value, target: target.value });
+          const t = box(res.text);
+          put(translated, el('p', { class: 'hint' }, `${res.target} · ${(res.ms / 1000).toFixed(1)} s`), t, actions(t));
+        } catch (err) {
+          put(translated, el('p', { class: 'hint' }, err.message));
+        }
+        go.disabled = false;
+      } }, 'Translate');
+      nodes.push(el('h4', {}, 'Translate to'), el('div', { class: 'row' }, target, go), translated);
+    }
+    put(this.out, ...nodes);
   },
   async compare() {
     put(this.out, el('p', { class: 'hint' }, 'Running both engines…'));
@@ -1081,6 +1110,7 @@ const settingsPanel = {
       el('h4', {}, 'Handwriting to text'),
       el('label', { class: 'field' }, el('span', {}, 'Engine'), mode),
       el('label', { class: 'field' }, el('span', {}, 'Gemma model (Ollama on this Mac)'), model),
+      el('p', { class: 'hint' }, 'Any language, even mixed on a page: Apple Vision reads English, and when it isn’t sure (as with Telugu, which it can’t read), Gemma reads every word in the script it’s written in. Writing that isn’t in English letters also gets an English translation, so searching “weather” finds “వాతావరణం”. For Telugu, gemma4:31b read every word right in a test; smaller models missed some.'),
       el('p', { class: 'hint' }, `Apple Vision: ${settings.vision ? 'available' : 'not available'} · Ollama: ${settings.gemma_models.length ? `${settings.gemma_models.length} model(s) that read images` : 'not running (start the Ollama app)'}. Nothing leaves this Mac.`),
       el('h4', {}, 'Phone'),
       el('label', { class: 'field' }, el('span', {}, 'Open the pad in'), browser),

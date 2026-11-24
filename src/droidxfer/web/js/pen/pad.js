@@ -319,7 +319,17 @@ async function toText(ids) {
         closeSheet();
         const strokes = (ids || p.order).filter((id) => p.objs[id]?.type === 'stroke');
         sock.sendOp({ op: 'batch', ops: [{ op: 'remove', page: p.id, ids: strokes }, { op: 'add', page: p.id, objs: [{ ...textObj, y: area[1] }] }] });
-      } }, 'Replace handwriting')));
+      } }, 'Replace handwriting')),
+    ...(result.translation ? [
+      el('h4', {}, 'English translation'),
+      el('div', { class: 'result-text' }, result.translation),
+      el('div', { class: 'row' },
+        el('button', { class: 'btn', type: 'button', onclick: () => { closeSheet(); act('copy_text', { text: result.translation }, { ok: 'Copied on the Mac' }); } }, 'Copy on the Mac'),
+        el('button', { class: 'btn', type: 'button', onclick: () => {
+          closeSheet();
+          sock.sendOp({ op: 'add', page: p.id, objs: [{ ...textObj, id: newId(), text: result.translation, y: area[3] + 10 }] });
+        } }, 'Insert below')),
+    ] : []));
 }
 
 // ------------------------------------------------------------------ selection bar

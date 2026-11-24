@@ -93,6 +93,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .sheet h3 { margin: 4px 0 10px; font-size: 15px; }
 .sheet h4 { margin: 14px 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.sheet .result-text + .row { margin-top: 10px; }
 .menu-list { display: grid; gap: 2px; }
 .menu-item {
   display: flex; align-items: center; gap: 12px; padding: 11px 10px; border-radius: 9px; border: 0; background: none;

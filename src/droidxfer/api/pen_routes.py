@@ -407,6 +407,22 @@ async def hw_compare(notebook_id: str, page: str | None = None, ctx: AppContext 
         return await asyncio.to_thread(handwriting.compare_sync, png, ctx.pen.settings["gemma_model"])
 
 
+class TranslateBody(BaseModel):
+    text: str = Field(min_length=1, max_length=20000)
+    target: Literal["English", "Malayalam", "Tamil", "Japanese", "Hindi"]
+
+
+@router.post("/translate")
+async def translate(body: TranslateBody, ctx: AppContext = Ctx) -> dict:
+    """Translate read handwriting with the local Gemma model (nothing leaves the Mac)."""
+    with ctx.pen.index.user_reading():
+        attempt = await asyncio.to_thread(handwriting.translate_sync, body.text, body.target,
+                                          ctx.pen.settings["gemma_model"])
+    if attempt.error:
+        raise HTTPException(503, attempt.error)
+    return {"text": attempt.text, "target": body.target, "ms": attempt.ms}
+
+
 # ------------------------------------------------------------------ stickers
 @router.get("/stickers")
 async def stickers(ctx: AppContext = Ctx) -> list[dict]:
