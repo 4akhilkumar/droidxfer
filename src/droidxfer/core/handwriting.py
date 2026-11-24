@@ -13,6 +13,7 @@ import json
 import logging
 import re
 import time
+import unicodedata
 import urllib.error
 import urllib.request
 from dataclasses import asdict, dataclass, field
@@ -25,15 +26,48 @@ log = logging.getLogger(__name__)
 
 OLLAMA_URL = "http://127.0.0.1:11434"
 MODES = ("auto", "vision", "gemma")
+TRANSLATE_TO = ("English", "Malayalam", "Tamil", "Japanese", "Hindi")
+OLLAMA_UNREACHABLE = "isn't reachable"  # part of the error when Ollama isn't running
 # Below this average confidence Auto asks Gemma. Measured on real S Pen handwriting: Vision said 0.73 while
 # getting 8 of ~30 words wrong, and Gemma 4 12b got them all; printed text scores 1.0.
 CONFIDENCE_FLOOR = 0.85
+# One instruction for every language: Gemma writes each word in the script it's written in. Tested on mixed
+# Telugu/English pages: it reads Telugu as well as an instruction that names Telugu does (gemma4:31b got every
+# word), and unlike that one it doesn't invent Telugu for English writing it can't make out.
 GEMMA_PROMPT = (
     "Transcribe the handwritten text in this image exactly as written, one line of output per written line. "
-    "Leave out words that are crossed out. Do not correct spelling, translate, describe drawings or add "
-    "anything else. Write plain text only: no Markdown, no LaTeX, no blank lines between lines; write an "
-    "arrow as ->. If there is no text, output nothing."
+    "The writing may be in any language and may mix languages and scripts, even on one line: write every word "
+    "in the script it is written in, exactly as it appears. Do not translate or transliterate anything. Leave "
+    "out words that are crossed out. Do not correct spelling, describe drawings or add anything else. Write "
+    "plain text only: no Markdown, no LaTeX, no blank lines between lines; write an arrow as ->. If there is no "
+    "text, output nothing."
 )
+
+
+def scripts(text: str) -> list[str]:
+    """The writing systems in a text, most letters first, from each letter's Unicode name
+    (TELUGU LETTER KA -> "Telugu"; kana and kanji -> "Japanese/Chinese")."""
+    counts: dict[str, int] = {}
+    for ch in text or "":
+        if not ch.isalpha():
+            continue
+        name = unicodedata.name(ch, "")
+        script = name.split(" ")[0].title() if name else "Other"
+        if script in ("Cjk", "Hiragana", "Katakana"):
+            script = "Japanese/Chinese"
+        counts[script] = counts.get(script, 0) + 1
+    return sorted(counts, key=lambda k: -counts[k])
+
+
+def needs_translation(text: str) -> bool:
+    """True when some of the writing isn't in English letters, so it gets an English translation for search."""
+    return any(s != "Latin" for s in scripts(text))
+
+
+def translate_prompt(text: str, target: str) -> str:
+    return (f"Translate this handwritten note into {target}. Keep words that are already {target} as they are. "
+            f"Write every word in {target} script, including names of people and places. "
+            "Keep one output line per input line. Output only the translation, nothing else.\n\n" + text)
 
 
 @dataclass
@@ -52,6 +86,7 @@ class Result:
     confidence: float | None
     ms: int
     attempts: list[Attempt] = field(default_factory=list)
+    translation: str | None = None  # English, when some of the writing isn't in English letters
 
     def to_dict(self) -> dict:
         return asdict(self)
@@ -103,27 +138,47 @@ def gemma_models(timeout: float = 2.0) -> list[str]:
     return [n for n in names if n]
 
 
-def _gemma(png: bytes, model: str, timeout: float = 240.0) -> Attempt:
-    start = time.perf_counter()
-    body = {"model": model, "prompt": GEMMA_PROMPT, "images": [base64.b64encode(png).decode()],
-            "stream": False, "think": False, "keep_alive": "10m", "options": {"temperature": 0}}
+def _generate(body: dict, timeout: float) -> tuple[dict | None, str | None]:
+    """One Ollama /api/generate call: (answer, None) or (None, error)."""
     try:
-        data = _post("/api/generate", body, timeout)
+        return _post("/api/generate", body, timeout), None
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", "replace")[:200]
         if exc.code == 400 and "think" in detail:  # older Ollama without the think switch
-            body.pop("think")
+            body = {k: v for k, v in body.items() if k != "think"}
             try:
-                data = _post("/api/generate", body, timeout)
+                return _post("/api/generate", body, timeout), None
             except Exception as again:
-                return Attempt("gemma", error=str(again), ms=round((time.perf_counter() - start) * 1000))
-        else:
-            return Attempt("gemma", error=f"Ollama said {exc.code}: {detail}", ms=round((time.perf_counter() - start) * 1000))
+                return None, str(again)
+        return None, f"Ollama said {exc.code}: {detail}"
     except (OSError, ValueError) as exc:
-        return Attempt("gemma", error=f"Ollama isn't reachable on {OLLAMA_URL} ({exc})",
-                       ms=round((time.perf_counter() - start) * 1000))
-    text = clean_model_text(data.get("response") or "")
-    return Attempt(f"gemma:{model}", text, None, round((time.perf_counter() - start) * 1000))
+        return None, f"Ollama {OLLAMA_UNREACHABLE} on {OLLAMA_URL} ({exc})"
+
+
+def _gemma(png: bytes, model: str, timeout: float = 240.0) -> Attempt:
+    start = time.perf_counter()
+    body = {"model": model, "prompt": GEMMA_PROMPT,
+            "images": [base64.b64encode(png).decode()], "stream": False, "think": False, "keep_alive": "10m",
+            "options": {"temperature": 0}}
+    data, error = _generate(body, timeout)
+    ms = round((time.perf_counter() - start) * 1000)
+    if error:
+        return Attempt("gemma", error=error, ms=ms)
+    return Attempt(f"gemma:{model}", clean_model_text(data.get("response") or ""), None, ms)
+
+
+def translate_sync(text: str, target: str, model: str, timeout: float = 240.0) -> Attempt:
+    """Translate text (no image, so it's quick) with a local Gemma model."""
+    if target not in TRANSLATE_TO:
+        raise ValueError(f"target must be one of {TRANSLATE_TO}")
+    start = time.perf_counter()
+    body = {"model": model, "prompt": translate_prompt(text, target), "stream": False, "think": False,
+            "keep_alive": "10m", "options": {"temperature": 0}}
+    data, error = _generate(body, timeout)
+    ms = round((time.perf_counter() - start) * 1000)
+    if error:
+        return Attempt("gemma", error=error, ms=ms)
+    return Attempt(f"gemma:{model}", clean_model_text(data.get("response") or ""), None, ms)
 
 
 _LATEX = {r"\rightarrow": "->", r"\to": "->", r"\leftarrow": "<-", r"\times": "x", r"\%": "%"}
@@ -132,6 +187,8 @@ _LATEX = {r"\rightarrow": "->", r"\to": "->", r"\leftarrow": "<-", r"\times": "x
 def clean_model_text(text: str) -> str:
     """Tidy a model's answer into plain text (it sometimes adds Markdown/LaTeX despite the prompt)."""
     text = text.strip()
+    if '"box_2d"' in text:  # a list of boxes and labels instead of a transcription: nothing usable
+        return ""
     if text.startswith("```"):
         text = text.strip("`").split("\n", 1)[-1].strip()
     text = re.sub(r"~~.*?~~", "", text)  # crossed-out words
@@ -144,6 +201,7 @@ def clean_model_text(text: str) -> str:
 
 
 def recognize_sync(png: bytes, mode: str = "auto", model: str = "gemma4:12b") -> Result:
+    """Read handwriting in any language; writing that isn't in English letters also gets an English translation."""
     if mode not in MODES:
         raise ValueError(f"mode must be one of {MODES}")
     png = prepare(png)
@@ -167,7 +225,22 @@ def recognize_sync(png: bytes, mode: str = "auto", model: str = "gemma4:12b") ->
         if errors and len(errors) == len(attempts):
             raise RuntimeError("; ".join(errors))
         return Result("", None, None, total, attempts)
-    return Result(chosen.text, chosen.engine, chosen.confidence, total, attempts)
+    result = Result(chosen.text, chosen.engine, chosen.confidence, total, attempts)
+    if needs_translation(chosen.text):
+        tr = translate_sync(chosen.text, "English", model)
+        result.ms += tr.ms
+        result.translation = None if tr.error else tr.text
+    return result
+
+
+def read_vision(png: bytes) -> Attempt:
+    """One Vision pass (for the background search index)."""
+    return _vision(prepare(png))
+
+
+def read_gemma(png: bytes, model: str) -> Attempt:
+    """One Gemma pass (for the background search index)."""
+    return _gemma(prepare(png), model)
 
 
 async def recognize(png: bytes, mode: str = "auto", model: str = "gemma4:12b") -> Result:

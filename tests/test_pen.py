@@ -7,6 +7,7 @@ from PIL import Image
 
 from droidxfer.api.app import create_app
 from droidxfer.core.context import AppContext
+from droidxfer.core.handwriting import Attempt, Result
 from droidxfer.core.notebooks import SNAPSHOT_EVERY, NoteError, NotebookStore, apply_op, blank_page
 from droidxfer.core.penrender import PageRenderer, page_to_svg, pages_to_pdf, stroke_width
 
@@ -273,6 +274,31 @@ def ws_headers():
     return {"cookie": f"droidxfer_{PORT}={TOKEN}", "host": f"127.0.0.1:{PORT}"}
 
 
+
+def test_delete_last_page_swaps_in_a_new_page(store):
+    nb = store.create("Last page")
+    old = nb.state["pages"][0]["id"]
+    nb.apply({"op": "add", "page": old, "objs": [stroke("a")]}, actor="pad")
+    fresh = blank_page("grid")
+    entry = nb.apply({"op": "batch", "ops": [{"op": "page_add", "page": fresh, "index": 1},
+                                             {"op": "page_remove", "id": old}]}, actor="mac")
+    assert entry.label == "Deleted page 1 and started a new grid page"
+    assert [(p["id"], p["template"], p["order"]) for p in nb.state["pages"]] == [(fresh["id"], "grid", [])]
+    nb.undo("mac")  # one undo brings the old page back, with its drawing
+    assert [(p["id"], p["order"]) for p in nb.state["pages"]] == [(old, ["a"])]
+    with pytest.raises(NoteError):  # a plain delete of the only page is still refused
+        nb.apply({"op": "page_remove", "id": old}, actor="mac")
+
+
+def test_live_current_page_follows_last_page_swap(authed):
+    with authed.websocket_connect("/api/pen/ws", headers=ws_headers()) as mac:
+        old = mac.receive_json()["current"]["page"]
+        fresh = blank_page("ruled")
+        mac.send_json({"t": "op", "cid": "c1", "op": {"op": "batch", "ops": [
+            {"op": "page_add", "page": fresh, "index": 1}, {"op": "page_remove", "id": old}]}})
+        applied = recv(mac)
+        assert applied["t"] == "applied" and applied["current"]["page"] == fresh["id"]
+
 def test_live_flow_two_peers(authed):
     with authed.websocket_connect("/api/pen/ws", headers=ws_headers()) as mac, \
             authed.websocket_connect("/api/pen/ws", headers=ws_headers()) as pad:
@@ -376,6 +402,23 @@ def test_pen_settings_validation(authed, monkeypatch):
     assert authed.put("/api/pen/settings", json={"browser": "com.android.chrome; reboot"}).status_code == 400
 
 
+def test_translate_route(authed, monkeypatch):
+    seen = {}
+
+    def translate(text, target, model, timeout=240.0):
+        seen["args"] = (text, target, model)
+        return Attempt(f"gemma:{model}", "మీ పేరు ఏమిటి?" if target == "English" else "നിങ്ങളുടെ പേര് എന്താണ്?", ms=7)
+
+    monkeypatch.setattr("droidxfer.core.handwriting.translate_sync", translate)
+    res = authed.post("/api/pen/translate", json={"text": "What is your name?", "target": "Malayalam"})
+    assert res.status_code == 200 and res.json()["target"] == "Malayalam"
+    assert seen["args"] == ("What is your name?", "Malayalam", "gemma4:12b")
+    assert authed.post("/api/pen/translate", json={"text": "x", "target": "Klingon"}).status_code == 422
+    monkeypatch.setattr("droidxfer.core.handwriting.translate_sync",
+                        lambda *a, **k: Attempt("gemma", error="Ollama isn't reachable on x"))
+    assert authed.post("/api/pen/translate", json={"text": "x", "target": "Hindi"}).status_code == 503
+
+
 def test_handwriting_fallback(monkeypatch):
     from droidxfer.core import handwriting, macbridge
 
@@ -446,3 +489,191 @@ def test_auto_asks_gemma_when_vision_is_only_fairly_sure(monkeypatch):
     monkeypatch.setattr(handwriting, "_post", lambda path, body, timeout: {"response": "I am 25 Yrs old"})
     r = handwriting.recognize_sync(png.getvalue(), "auto", "gemma4:12b")
     assert r.engine == "gemma:gemma4:12b" and r.text == "I am 25 Yrs old"
+
+
+# ------------------------------------------------------------------ background handwriting reading
+@pytest.fixture
+def reader(store, tmp_path, monkeypatch):
+    """A hub whose readers are fakes: Vision misreads "budget", Gemma gets it right."""
+    from droidxfer.core import handwriting, macbridge, penindex
+    from droidxfer.core.penpad import PenHub, PenSettings
+
+    calls = {"vision": 0, "gemma": 0}
+    fake = {"vision": Attempt("vision", "bugdet plan", 0.5),
+            "gemma": Attempt("gemma:gemma4:12b", "budget plan"), "power": True,
+            "translate": Attempt("gemma:gemma4:31b", "What is the weather like?")}
+
+    def vision(png):
+        calls["vision"] += 1
+        return fake["vision"]
+
+    def gemma(png, model):
+        calls["gemma"] += 1
+        fake["gemma_model"] = model
+        return fake["gemma"]
+
+    def translate(text, target, model):
+        fake["translated"] = fake.get("translated", 0) + 1
+        return fake["translate"]
+
+    monkeypatch.setattr(handwriting, "read_vision", vision)
+    monkeypatch.setattr(handwriting, "read_gemma", gemma)
+    monkeypatch.setattr(handwriting, "translate_sync", translate)
+    monkeypatch.setattr(macbridge, "on_ac_power", lambda: fake["power"])
+    monkeypatch.setattr(penindex, "VISION_IDLE", 0.0)
+    monkeypatch.setattr(penindex, "GEMMA_IDLE", 0.0)
+    monkeypatch.setattr(penindex, "POWER_CHECK", 0.0)
+    hub = PenHub(None, None, None, store, PenSettings(tmp_path / "pen.json"))  # type: ignore[arg-type]
+    nb = store.create("Ideas")
+    page = nb.state["pages"][0]["id"]
+    nb.apply({"op": "add", "page": page, "objs": [stroke("a")]}, actor="pad")
+    hub.index.changed(nb.id, [page])
+    return hub, nb, page, calls, fake
+
+
+async def test_index_reads_with_vision_then_gemma_and_searches_both(reader):
+    hub, nb, page, calls, _ = reader
+    await hub.index.step()
+    assert calls == {"vision": 1, "gemma": 1}
+    hit = hub.search("budget")
+    assert hit and hit[0]["snippet"] == "budget plan"  # Gemma's reading is preferred for the snippet
+    assert hub.search("bugdet")  # Vision's reading still matches
+    await hub.index.step()
+    assert calls == {"vision": 1, "gemma": 1}  # an unchanged page is never read twice
+    nb.apply({"op": "add", "page": page, "objs": [stroke("b", y=300)]}, actor="pad")
+    hub.index.changed(nb.id, [page])
+    await hub.index.step()
+    assert calls == {"vision": 2, "gemma": 2}
+
+
+async def test_index_gemma_text_is_ignored_once_the_page_changes(reader):
+    hub, nb, page, calls, fake = reader
+    await hub.index.step()
+    fake["power"] = False  # Gemma can't refresh its reading now
+    nb.apply({"op": "add", "page": page, "objs": [stroke("b", y=300)]}, actor="pad")
+    hub.index.changed(nb.id, [page])
+    await hub.index.step()
+    assert not hub.search("budget") and hub.search("bugdet")
+
+
+async def test_index_follows_the_engine_setting(reader):
+    hub, nb, page, calls, fake = reader
+    hub.settings.update(hw_mode="vision")
+    await hub.index.step()
+    assert calls == {"vision": 1, "gemma": 0}
+    fake["vision"] = Attempt("vision", "bugdet plan", 0.97)
+    hub.settings.update(hw_mode="auto")
+    hub.index.changed(nb.id, [page])
+    hub.index._file(nb, page).unlink()
+    await hub.index.step()
+    assert calls == {"vision": 2, "gemma": 0}  # Auto: Vision was sure, so no Gemma
+    hub.settings.update(hw_mode="gemma")
+    hub.index.rescan_soon()
+    await hub.index.step()
+    assert calls == {"vision": 2, "gemma": 1}  # Gemma: every page gets a Gemma reading
+
+
+async def test_index_gemma_waits_for_power_ollama_and_the_user(reader):
+    hub, nb, page, calls, fake = reader
+    fake["power"] = False
+    await hub.index.step()
+    assert calls["gemma"] == 0 and hub.index.status()["paused"] == "battery"
+    assert hub.index.status()["gemma_pending"] == 1
+    fake["power"] = True
+    with hub.index.user_reading():
+        await hub.index.step()
+    assert calls["gemma"] == 0  # steps aside while the user reads a page
+    fake["gemma"] = Attempt("gemma", "", None, 0, "Ollama isn't reachable on http://127.0.0.1:11434 (refused)")
+    await hub.index.step()
+    assert calls["gemma"] == 1 and hub.index.status() == {
+        "mode": "auto", "model": "gemma4:12b", "gemma_pending": 1, "vision_pending": 0, "paused": "ollama"}
+    await hub.index.step()
+    assert calls["gemma"] == 1  # waits a while before trying Ollama again
+
+
+async def test_index_keeps_what_the_user_read(reader):
+    hub, nb, page, calls, _ = reader
+    pg = nb.state["pages"][0]
+    hub.index.remember(nb, pg, Result("budget plan", "gemma:gemma4:12b", None, 0, [
+        Attempt("vision", "bugdet plan", 0.5), Attempt("gemma:gemma4:12b", "budget plan")]))
+    hub.index.vision_queue.clear()
+    await hub.index.step()
+    assert calls == {"vision": 0, "gemma": 0} and hub.search("budget")
+
+
+def test_index_reads_old_records(store, tmp_path):
+    from droidxfer.core.penpad import PenHub, PenSettings
+
+    hub = PenHub(None, None, None, store, PenSettings(tmp_path / "pen.json"))  # type: ignore[arg-type]
+    nb = store.create("Old")
+    page = nb.state["pages"][0]["id"]
+    (nb.folder / "text").mkdir()
+    (nb.folder / "text" / f"{page}.json").write_text(json.dumps({"seq": 1, "text": "shopping list"}))
+    assert hub.search("shopping")[0]["page_no"] == 1
+
+
+async def test_index_translates_other_scripts_and_searches_both(reader):
+    hub, nb, page, calls, fake = reader
+    fake["gemma"] = Attempt("gemma:gemma4:12b", "Hi! వాతావరణం ఎలా ఉంది?")
+    await hub.index.step()
+    assert fake["translated"] == 1  # no setting needed: Telugu letters were found
+    hit = hub.search("వాతావరణం")
+    assert hit and hit[0]["via"] == "writing" and hit[0]["snippet"] == "Hi! వాతావరణం ఎలా ఉంది?"
+    hit = hub.search("weather")
+    assert hit and hit[0]["via"] == "translation" and "weather" in hit[0]["snippet"]
+    # Telugu typed as a different (but equal) sequence of code points still matches
+    import unicodedata
+    assert hub.search(unicodedata.normalize("NFD", "వాతావరణం"))
+    # another model means another reading
+    hub.settings.update(gemma_model="gemma4:31b")
+    hub.index.rescan_soon()
+    await hub.index.step()
+    assert fake["gemma_model"] == "gemma4:31b" and calls["gemma"] == 2
+
+
+async def test_index_english_reading_is_not_translated(reader):
+    hub, nb, page, calls, fake = reader
+    await hub.index.step()
+    assert calls["gemma"] == 1 and "translated" not in fake and hub.search("budget")
+
+
+def test_scripts_are_detected_from_the_letters():
+    from droidxfer.core.handwriting import needs_translation, scripts
+
+    assert scripts("Hi! నా పేరు Akhil!") == ["Latin", "Telugu"]
+    assert scripts("मेरा नाम Akhil है") == ["Devanagari", "Latin"]
+    assert scripts("私の名前はアキルです") == ["Japanese/Chinese"]
+    assert scripts("café 42 -> ok!") == ["Latin"]
+    assert needs_translation("from అనపర్తి") and not needs_translation("Where are you? 123")
+
+
+def test_recognize_reads_any_script_and_translates_it(monkeypatch):
+    from droidxfer.core import handwriting
+
+    seen = {}
+    monkeypatch.setattr(handwriting, "prepare", lambda png: png)
+    monkeypatch.setattr(handwriting, "_vision", lambda png: Attempt("vision", "3 asu Sod8?", 0.3))
+
+    def gemma(png, model, timeout=240.0):
+        seen["read"] = model
+        return Attempt(f"gemma:{model}", "నీ పేరు ఏంటి?")
+
+    def translate(text, target, model, timeout=240.0):
+        seen["translate"] = (text, target, model)
+        return Attempt(f"gemma:{model}", "What is your name?", ms=5)
+
+    monkeypatch.setattr(handwriting, "_gemma", gemma)
+    monkeypatch.setattr(handwriting, "translate_sync", translate)
+    result = handwriting.recognize_sync(b"png", "auto", "gemma4:31b")
+    assert result.text == "నీ పేరు ఏంటి?" and result.translation == "What is your name?"
+    assert seen == {"read": "gemma4:31b", "translate": ("నీ పేరు ఏంటి?", "English", "gemma4:31b")}
+    seen.clear()
+    monkeypatch.setattr(handwriting, "_vision", lambda png: Attempt("vision", "Where are you?", 0.95))
+    english = handwriting.recognize_sync(b"png", "auto", "gemma4:31b")
+    assert english.text == "Where are you?" and english.translation is None and seen == {}
+
+
+def test_box_lists_are_not_taken_as_text():
+    from droidxfer.core.handwriting import clean_model_text
+
+    assert clean_model_text('[{"box_2d": [21, 186, 188, 728], "text_content": "x"}]') == ""

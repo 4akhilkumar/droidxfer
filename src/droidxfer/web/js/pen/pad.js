@@ -255,11 +255,24 @@ function openPaper() {
 }
 
 function deletePage() {
+  const old = page();
+  if (!old) return;
   if (state.pages.length <= 1) {
-    toast('A notebook needs at least one page.');
+    // The only page: ask which paper the new empty page gets, then swap them in one undoable change.
+    sheet('Delete the last page?',
+      el('p', { class: 'hint' }, 'This is the only page, so a new empty page takes its place. Choose its paper. Undo brings the deleted page back.'),
+      el('div', { class: 'menu-list' }, [['blank', 'Blank'], ['ruled', 'Ruled'], ['grid', 'Grid'], ['dot', 'Dots']].map(([v, label]) =>
+        el('button', { class: `menu-item${old.template === v ? ' on' : ''}`, type: 'button', onclick: () => {
+          closeSheet();
+          if (!state.pages.some((p) => p.id === old.id)) return;
+          const fresh = { id: newId(), w: old.bg ? 1000 : old.w, h: old.bg ? 1414 : old.h, template: v, bg: null, objs: {}, order: [] };
+          pendingPage = fresh.id;
+          sock.sendOp({ op: 'batch', ops: [{ op: 'page_add', page: fresh, index: 1 }, { op: 'page_remove', id: old.id }] });
+          toast('Page deleted. Undo brings it back.');
+        } }, label))));
     return;
   }
-  sock.sendOp({ op: 'page_remove', id: page().id });
+  sock.sendOp({ op: 'page_remove', id: old.id });
   toast('Page deleted. Undo brings it back.');
 }
 
@@ -306,7 +319,17 @@ async function toText(ids) {
         closeSheet();
         const strokes = (ids || p.order).filter((id) => p.objs[id]?.type === 'stroke');
         sock.sendOp({ op: 'batch', ops: [{ op: 'remove', page: p.id, ids: strokes }, { op: 'add', page: p.id, objs: [{ ...textObj, y: area[1] }] }] });
-      } }, 'Replace handwriting')));
+      } }, 'Replace handwriting')),
+    ...(result.translation ? [
+      el('h4', {}, 'English translation'),
+      el('div', { class: 'result-text' }, result.translation),
+      el('div', { class: 'row' },
+        el('button', { class: 'btn', type: 'button', onclick: () => { closeSheet(); act('copy_text', { text: result.translation }, { ok: 'Copied on the Mac' }); } }, 'Copy on the Mac'),
+        el('button', { class: 'btn', type: 'button', onclick: () => {
+          closeSheet();
+          sock.sendOp({ op: 'add', page: p.id, objs: [{ ...textObj, id: newId(), text: result.translation, y: area[3] + 10 }] });
+        } }, 'Insert below')),
+    ] : []));
 }
 
 // ------------------------------------------------------------------ selection bar

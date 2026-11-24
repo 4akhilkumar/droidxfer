@@ -93,6 +93,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .sheet h3 { margin: 4px 0 10px; font-size: 15px; }
 .sheet h4 { margin: 14px 0 6px; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); }
+.sheet .result-text + .row { margin-top: 10px; }
 .menu-list { display: grid; gap: 2px; }
 .menu-item {
   display: flex; align-items: center; gap: 12px; padding: 11px 10px; border-radius: 9px; border: 0; background: none;
@@ -111,6 +112,20 @@ input[type=range] { width: 100%; accent-color: var(--accent); }
 .field input, .field select, .field textarea, .input {
   border: 1px solid var(--border); border-radius: 8px; background: var(--panel); padding: 7px 9px; min-height: 32px;
 }
+/* Dropdowns: same custom arrow as the main app (styles.css), drawn 10px from the right edge. */
+select, select.input, .field select, .pen-top select {
+  -webkit-appearance: none;
+  appearance: none;
+  padding-right: 30px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M2.5 4.5 6 8l3.5-3.5' fill='none' stroke='%239898a2' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 12px 12px;
+  cursor: pointer;
+  transition: border-color 0.15s ease;
+}
+select:hover:not(:disabled) { border-color: var(--muted); }
+select:disabled { opacity: .6; cursor: default; }
 .muted { color: var(--muted); }
 .hint { color: var(--muted); font-size: 12px; line-height: 1.45; }
 .result-text {
@@ -176,7 +191,7 @@ body.mac-pen { display: grid; grid-template-rows: auto minmax(0, 1fr); height: 1
 .pen-top .group { display: flex; align-items: center; gap: 2px; }
 .pen-top .sep { width: 1px; height: 22px; background: var(--border); margin: 0 4px; }
 .pen-top .spacer { flex: 1; }
-.pen-top select { border: 1px solid var(--border); border-radius: 8px; background: var(--panel); padding: 4px 8px; min-height: 30px; max-width: 220px; }
+.pen-top select { border: 1px solid var(--border); border-radius: 8px; background-color: var(--panel); padding-block: 4px; padding-left: 8px; min-height: 30px; max-width: 220px; }
 .pen-top .icon-btn { width: 34px; height: 34px; }
 .phone-box { display: flex; align-items: center; gap: 6px; padding: 3px 8px; border: 1px solid var(--border); border-radius: 10px; }
 .pen-main { display: grid; grid-template-columns: 170px minmax(0, 1fr) 340px; min-height: 0; }
@@ -206,6 +221,10 @@ body.mac-pen { display: grid; grid-template-rows: auto minmax(0, 1fr); height: 1
 .side-tabs button { flex: 1; border: 0; background: none; padding: 10px 4px; cursor: pointer; color: var(--muted); border-bottom: 2px solid transparent; }
 .side-tabs button.on { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
 .side-body { overflow: auto; padding: 12px; }
+/* Vertical rhythm: every block in the side panel (and in .stack groups inside it) gets 10px above it.
+   Paragraph and heading margins are larger and collapse with this, so they keep their own spacing. */
+.side-body > * + *, .stack > * + * { margin-top: 10px; }
+.side-body textarea, .side-body input.input { display: block; }   /* no inline baseline gap under them */
 .session-head { display: flex; align-items: center; gap: 8px; margin: 14px 0 6px; cursor: pointer; }
 .session-head img { width: 52px; border-radius: 4px; border: 1px solid var(--border); background: #fff; }
 .session-head .t { font-weight: 600; }
@@ -234,5 +253,6 @@ body.mac-pen { display: grid; grid-template-rows: auto minmax(0, 1fr); height: 1
 .present .close { position: absolute; right: 14px; top: 14px; z-index: 5; color: #fff; }
 .menu-pop { position: absolute; z-index: 40; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow); padding: 4px; min-width: 200px; }
 .menu-pop .menu-item { font-size: 13px; padding: 8px 10px; }
+.paper-choices { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 12px; }
 .stage:fullscreen, .stage:fullscreen .ink-host { background: #000; }
 .stage:fullscreen .banner, .stage:fullscreen .selbar { display: none; }

@@ -542,7 +542,8 @@ export class InkCanvas {
       } else {
         let s = this.remote.get(msg.id);
         if (!s || msg.reset) {
-          s = { id: msg.id, page: msg.page, tool: msg.tool, color: msg.color, size: msg.size, pts: [] };
+          // type is needed: drawObj() only draws objects whose type it knows
+          s = { id: msg.id, type: 'stroke', page: msg.page, tool: msg.tool, color: msg.color, size: msg.size, pts: [] };
           this.remote.set(msg.id, s);
         }
         s.pts.push(...msg.pts);

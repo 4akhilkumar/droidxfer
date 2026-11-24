@@ -34,12 +34,12 @@ from .config import app_dir, cache_dir
 from .devices import DeviceManager, DeviceUnavailable
 from .events import EventBus
 from .notebooks import TEMPLATES, NoteError, Notebook, NotebookStore, blank_page, new_id, valid_name
+from .penindex import HandwritingIndex
 from .penrender import PageRenderer, flatten, obj_bounds, to_png
 
 log = logging.getLogger(__name__)
 
 PAD_COOKIE = "droidxfer_pad"
-INDEX_IDLE = 4.0  # seconds after the last change before a page's handwriting is (re)indexed
 MAX_PICTURE = 60 * 1024 * 1024
 
 DEFAULT_SHORTCUTS: dict[str, list[list[str]]] = {
@@ -148,7 +148,7 @@ class PenHub:
         self.tablet: macbridge.TabletInjector | None = None
         self.tablet_on = False
         self.tablet_rect: dict | None = None
-        self._index_dirty: dict[tuple[str, str], float] = {}
+        self.index = HandwritingIndex(self)  # background handwriting reading for search
         self._tasks: list[asyncio.Task] = []
         self._watch_queue: asyncio.Queue | None = None
         self.indexer_enabled = True
@@ -158,7 +158,7 @@ class PenHub:
         self._watch_queue = self.bus.subscribe()
         self._tasks.append(asyncio.create_task(self._watch_devices()))
         if self.indexer_enabled:
-            self._tasks.append(asyncio.create_task(self._index_loop()))
+            self._tasks.append(asyncio.create_task(self.index.run()))
 
     async def stop(self) -> None:
         try:
@@ -272,8 +272,7 @@ class PenHub:
 
     def _on_entry(self, entry) -> None:
         if self.current.get("notebook"):
-            for page in entry.pages:
-                self._index_dirty[(self.current["notebook"], page)] = time.monotonic()
+            self.index.changed(self.current["notebook"], entry.pages)
 
     def _state_msg(self, nb: Notebook) -> dict:
         return {"t": "state", **nb.snapshot(), "current": self.current, "tool": self.tool, "status": self.status(),
@@ -378,8 +377,8 @@ class PenHub:
                "can_undo": bool(nb.undo_stack), "can_redo": bool(nb.redo_stack)}
         if cid:
             msg["cid"] = cid
-        if entry.op.get("op") in ("page_remove", "pages_replace", "page_replace") and not any(
-                p["id"] == self.current.get("page") for p in nb.state["pages"]):
+        # Any change (a page delete, a batch that swaps the last page, an undo...) can remove the current page.
+        if not any(p["id"] == self.current.get("page") for p in nb.state["pages"]):
             self.current["page"] = nb.state["pages"][0]["id"]
         msg["current"] = self.current
         self.broadcast(msg)
@@ -507,7 +506,10 @@ class PenHub:
         nb = self.notebook()
         page = self.find_page(nb, page_id)
         png, crop = self._ink_png(nb, page, ids)
-        result = await handwriting.recognize(png, mode or self.settings["hw_mode"], self.settings["gemma_model"])
+        with self.index.user_reading():
+            result = await handwriting.recognize(png, mode or self.settings["hw_mode"], self.settings["gemma_model"])
+        if not ids:
+            self.index.remember(nb, page, result)
         out = result.to_dict()
         if insert in ("below", "replace") and result.text:
             text_obj = {"id": new_id(), "type": "text", "text": result.text, "color": "#1d1d1f",
@@ -672,82 +674,12 @@ class PenHub:
         return {"id": obj["id"]}
 
     # ------------------------------------------------------------------ search index
-    def _text_file(self, nb: Notebook, page_id: str) -> Path:
-        return nb.folder / "text" / f"{page_id}.json"
-
     async def index_page(self, nb: Notebook, page_id: str) -> str:
-        page = self.find_page(nb, page_id)
-        try:
-            png, _ = self._ink_png(nb, page, None)
-            lines = await asyncio.to_thread(macbridge.vision_recognize, png)
-            text = "\n".join(l.text for l in lines)
-        except NoteError:
-            text = ""
-        path = self._text_file(nb, page_id)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps({"seq": nb.seq, "text": text}))
-        return text
-
-    async def _index_loop(self) -> None:
-        if not macbridge.vision_available():
-            return
-        await asyncio.sleep(5)
-        try:  # catch up on pages changed while droidxfer wasn't running
-            for info in self.store.list():
-                if info.get("exclude_search"):
-                    continue
-                nb = self.store.get(info["id"])
-                for page in nb.state["pages"]:
-                    path = self._text_file(nb, page["id"])
-                    if not path.exists() or (nb.entries and path.stat().st_mtime < nb.entries[-1].t):
-                        self._index_dirty[(nb.id, page["id"])] = 0.0
-        except Exception:
-            log.exception("search index scan failed")
-        while True:
-            await asyncio.sleep(1.5)
-            now = time.monotonic()
-            ready = [k for k, t in self._index_dirty.items() if now - t >= INDEX_IDLE]
-            for key in ready[:5]:
-                self._index_dirty.pop(key, None)
-                try:
-                    nb = self.store.get(key[0])
-                    if nb.meta.get("exclude_search"):
-                        continue
-                    await self.index_page(nb, key[1])
-                except (KeyError, NoteError):
-                    continue
-                except Exception as exc:
-                    log.warning("couldn't index handwriting on %s: %s", key, exc)
+        """Read a page with Vision now (the Gemma pass follows in the background if the setting asks for it)."""
+        return (await self.index.read_vision(nb, self.find_page(nb, page_id)))["text"]
 
     def search(self, query: str, limit: int = 50) -> list[dict]:
-        words = [w.lower() for w in query.split() if w.strip()]
-        if not words:
-            return []
-        hits = []
-        for info in self.store.list():
-            if info.get("exclude_search"):
-                continue
-            nb = self.store.get(info["id"])
-            for index, page in enumerate(nb.state["pages"]):
-                texts = []
-                path = self._text_file(nb, page["id"])
-                if path.exists():
-                    try:
-                        texts.append(json.loads(path.read_text()).get("text", ""))
-                    except ValueError:
-                        pass
-                texts += [o["text"] for o in page["objs"].values() if o["type"] == "text"]
-                haystack = "\n".join(texts)
-                low = haystack.lower()
-                if all(w in low for w in words):
-                    at = low.find(words[0])
-                    start = max(0, at - 60)
-                    snippet = haystack[start: at + 100].replace("\n", " ")
-                    hits.append({"notebook": nb.id, "name": nb.name, "page": page["id"], "page_no": index + 1,
-                                 "snippet": ("…" if start else "") + snippet})
-                    if len(hits) >= limit:
-                        return hits
-        return hits
+        return self.index.search(query, limit)
 
     # ------------------------------------------------------------------ tablet mode
     def tablet_info(self) -> dict:

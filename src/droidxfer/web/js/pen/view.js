@@ -374,11 +374,47 @@ function pageMenu(anchor, id) {
     ['-'],
     ...[['blank', 'Blank paper'], ['ruled', 'Ruled paper'], ['grid', 'Grid paper'], ['dot', 'Dotted paper']].map(([t, label]) => [label, () => sock.sendOp({ op: 'page_update', id, template: t }), page.template === t ? '✓' : '']),
     ['-'],
-    ['Delete page', () => {
-      if (state.pages.length <= 1) toast('A notebook needs at least one page.');
-      else sock.sendOp({ op: 'page_remove', id });
-    }],
+    ['Delete page', () => deletePage(id)],
   ]);
+}
+
+const PAPERS = [['blank', 'Blank'], ['ruled', 'Ruled'], ['grid', 'Grid'], ['dot', 'Dots']];
+
+// Deleting the only page: ask which paper the fresh page should have, then replace it.
+function choosePaper(current) {
+  return new Promise((resolve) => {
+    let picked = null;
+    const dlg = el('dialog', { class: 'sheet', style: { position: 'fixed', inset: '0', margin: 'auto', width: '400px', height: 'fit-content' } });
+    const choices = el('div', { class: 'paper-choices' }, PAPERS.map(([v, label]) => el('button', {
+      class: `btn${v === current ? ' primary' : ''}`, type: 'button', onclick: () => { picked = v; dlg.close(); },
+    }, label)));
+    dlg.append(
+      el('h3', {}, 'Delete the last page?'),
+      el('p', { class: 'hint' }, 'This is the only page, so a new empty page takes its place. Choose its paper. Undo brings the deleted page back.'),
+      choices,
+      el('div', { class: 'row', style: { justifyContent: 'flex-end', marginTop: '14px' } },
+        el('button', { class: 'btn', type: 'button', onclick: () => dlg.close() }, 'Cancel')),
+    );
+    dlg.addEventListener('close', () => { dlg.remove(); resolve(picked); });
+    document.body.append(dlg);
+    dlg.showModal();
+    choices.querySelector('.primary')?.focus();
+  });
+}
+
+async function deletePage(id) {
+  const old = state.pages.find((p) => p.id === id);
+  if (!old) return;
+  if (state.pages.length > 1) {
+    sock.sendOp({ op: 'page_remove', id });
+    return;
+  }
+  const template = await choosePaper(old.template);
+  if (!template || !state.pages.some((p) => p.id === id)) return;
+  const fresh = { id: newId(), w: old.bg ? 1000 : old.w, h: old.bg ? 1414 : old.h, template, bg: null, objs: {}, order: [] };
+  pendingPage = fresh.id;
+  // One batch, so a single undo restores the old page: add the new page first, then remove the old one.
+  sock.sendOp({ op: 'batch', ops: [{ op: 'page_add', page: fresh, index: 1 }, { op: 'page_remove', id }] });
 }
 
 let pendingPage = null;
@@ -820,7 +856,7 @@ const textPanel = {
     const modeSel = el('select', { class: 'input' }, [['', `Default (${settings?.hw_mode || 'auto'})`], ['auto', 'Auto: Vision, then Gemma'], ['vision', 'Apple Vision only'], ['gemma', 'Gemma only']].map(([v, l]) => new Option(l, v)));
     this.modeSel = modeSel;
     this.buttons = el('div', { class: 'row' });
-    this.out = el('div', {});
+    this.out = el('div', { class: 'stack' });
     const search = el('input', { class: 'input', type: 'search', placeholder: 'Search your handwriting…', style: { width: '100%' } });
     const hits = el('div', {});
     let t = null;
@@ -832,7 +868,7 @@ const textPanel = {
         try {
           const res = await get(`/api/pen/search?${qs({ q })}`);
           put(hits, ...(res.length ? res.map((h) => el('button', { class: 'search-hit', type: 'button', onclick: () => openHit(h) },
-            el('div', {}, el('b', {}, h.name), ` · page ${h.page_no}`), el('div', { class: 's' }, h.snippet))) : [el('p', { class: 'hint' }, 'No matches.')]));
+            el('div', {}, el('b', {}, h.name), ` · page ${h.page_no}`), el('div', { class: 's' }, h.via === 'translation' ? `English translation: ${h.snippet}` : h.snippet))) : [el('p', { class: 'hint' }, 'No matches.')]));
         } catch (err) {
           put(hits, el('p', { class: 'hint' }, err.message));
         }
@@ -845,12 +881,31 @@ const textPanel = {
       this.out,
       el('h4', {}, 'Search all notebooks'),
       search, hits,
-      el('p', { class: 'hint' }, 'Handwriting is read in the background a few seconds after you stop writing (Apple Vision, on this Mac), so you can search it. Notebooks can be excluded from the notebook menu.'),
+      this.indexLine = el('p', { class: 'hint' }),
+      el('p', { class: 'hint' }, 'Handwriting is read in the background so you can search it: by Apple Vision a few seconds after you stop writing, then by Gemma when the engine is Gemma, or Auto and Vision wasn’t sure. Gemma reads one page at a time, only while the Mac is plugged in. Everything stays on this Mac. Notebooks can be excluded from the notebook menu.'),
       el('h4', {}, 'Which engine is better for my handwriting?'),
       el('button', { class: 'btn small', type: 'button', onclick: () => this.compare() }, 'Compare Vision and Gemma on this page'),
     );
     this.renderButtons();
     this.renderResult();
+    this.refreshIndex();
+  },
+  async refreshIndex() {
+    clearTimeout(this.indexTimer);
+    if (sideTab !== 'text' || !this.indexLine?.isConnected) return;
+    try {
+      const s = await get('/api/pen/search/status');
+      const n = s.gemma_pending;
+      const pages = `${n} page${n === 1 ? '' : 's'}`;
+      this.indexLine.textContent = s.mode === 'vision' ? ''
+        : s.paused === 'battery' && n ? `Improving search with Gemma: ${pages} waiting until the Mac is plugged in.`
+        : s.paused === 'ollama' && n ? `Gemma isn’t reachable (start the Ollama app), so ${pages} wait. Search uses Apple Vision’s reading meanwhile.`
+        : n ? `Improving search: ${pages} left to read with Gemma.`
+        : 'Search uses Gemma’s reading where it helps.';
+    } catch {
+      this.indexLine.textContent = '';
+    }
+    this.indexTimer = setTimeout(() => this.refreshIndex(), 5000);
   },
   renderButtons() {
     if (!this.buttons || sideTab !== 'text') return;
@@ -880,23 +935,52 @@ const textPanel = {
     const r = this.result;
     if (!r || !this.out) return;
     const engine = (name) => (name?.startsWith('gemma') ? `Gemma (${name.slice(6)})` : 'Apple Vision');
-    const text = el('textarea', { class: 'result-text', style: { width: '100%', minHeight: '120px' } });
-    text.value = r.text;
     const page = ink.page;
     const area = unionBounds((this.ids || page.order).map((id) => page.objs[id]).filter((o) => o?.type === 'stroke')) || [40, 40, 440, 100];
-    const textObj = () => ({ id: newId(), type: 'text', text: text.value, color: '#1d1d1f', size: 28, x: area[0], w: Math.max(200, area[2] - area[0]) });
-    put(this.out, 
+    const textObj = (value) => ({ id: newId(), type: 'text', text: value, color: '#1d1d1f', size: 28, x: area[0], w: Math.max(200, area[2] - area[0]) });
+    const box = (value) => {
+      const t = el('textarea', { class: 'result-text', style: { width: '100%', minHeight: '120px' } });
+      t.value = value;
+      return t;
+    };
+    // Copy and Insert below for any text box (the reading or a translation)
+    const actions = (t, extra = []) => el('div', { class: 'row' },
+      el('button', { class: 'btn small', type: 'button', onclick: () => navigator.clipboard.writeText(t.value).then(() => toast('Copied', 'success')) }, 'Copy'),
+      el('button', { class: 'btn small', type: 'button', onclick: () => sock.sendOp({ op: 'add', page: page.id, objs: [{ ...textObj(t.value), y: area[3] + 10 }] }) }, 'Insert below'),
+      ...extra);
+    const text = box(r.text);
+    const nodes = [
       r.text ? text : el('p', { class: 'hint' }, 'No text found.'),
       el('p', { class: 'hint' }, r.engine ? `${engine(r.engine)}${r.confidence != null ? ` · ${Math.round(r.confidence * 100)}% sure` : ''} · ${(r.ms / 1000).toFixed(1)} s` : ''),
       r.attempts.length > 1 ? el('p', { class: 'hint' }, `Tried: ${r.attempts.map((a) => `${engine(a.engine)} (${a.error ? 'failed' : `${(a.ms / 1000).toFixed(1)} s`})`).join(', ')}`) : null,
-      r.text ? el('div', { class: 'row' },
-        el('button', { class: 'btn small', type: 'button', onclick: () => navigator.clipboard.writeText(text.value).then(() => toast('Copied', 'success')) }, 'Copy'),
-        el('button', { class: 'btn small', type: 'button', onclick: () => sock.sendOp({ op: 'add', page: page.id, objs: [{ ...textObj(), y: area[3] + 10 }] }) }, 'Insert below'),
-        el('button', { class: 'btn small', type: 'button', onclick: () => {
-          const strokes = (this.ids || page.order).filter((id) => page.objs[id]?.type === 'stroke');
-          sock.sendOp({ op: 'batch', ops: [{ op: 'remove', page: page.id, ids: strokes }, { op: 'add', page: page.id, objs: [{ ...textObj(), y: area[1] }] }] });
-        } }, 'Replace handwriting')) : null,
-    );
+    ];
+    if (r.text) {
+      nodes.push(actions(text, [el('button', { class: 'btn small', type: 'button', onclick: () => {
+        const strokes = (this.ids || page.order).filter((id) => page.objs[id]?.type === 'stroke');
+        sock.sendOp({ op: 'batch', ops: [{ op: 'remove', page: page.id, ids: strokes }, { op: 'add', page: page.id, objs: [{ ...textObj(text.value), y: area[1] }] }] });
+      } }, 'Replace handwriting')]));
+      if (r.translation) {
+        const tr = box(r.translation);
+        nodes.push(el('h4', {}, 'English translation'), tr, actions(tr));
+      }
+      // other languages on demand (one quick Gemma request, no image)
+      const target = el('select', { class: 'input' }, ['English', 'Malayalam', 'Tamil', 'Japanese', 'Hindi'].map((l) => new Option(l, l)));
+      const translated = el('div', { class: 'stack' });
+      const go = el('button', { class: 'btn small', type: 'button', onclick: async () => {
+        go.disabled = true;
+        put(translated, el('p', { class: 'hint' }, `Translating into ${target.value}…`));
+        try {
+          const res = await post('/api/pen/translate', { text: text.value, target: target.value });
+          const t = box(res.text);
+          put(translated, el('p', { class: 'hint' }, `${res.target} · ${(res.ms / 1000).toFixed(1)} s`), t, actions(t));
+        } catch (err) {
+          put(translated, el('p', { class: 'hint' }, err.message));
+        }
+        go.disabled = false;
+      } }, 'Translate');
+      nodes.push(el('h4', {}, 'Translate to'), el('div', { class: 'row' }, target, go), translated);
+    }
+    put(this.out, ...nodes);
   },
   async compare() {
     put(this.out, el('p', { class: 'hint' }, 'Running both engines…'));
@@ -976,7 +1060,7 @@ const tabletPanel = {
       el('button', { class: 'icon-btn', type: 'button', title: 'Remove', onclick: () => { all[this.profile].splice(i, 1); draw(); } }, svg('close', 16)))));
     const profileSel = el('select', { class: 'input', onchange: () => { this.profile = profileSel.value; draw(); } }, names.map((n) => { const o = new Option(n, n); o.selected = n === this.profile; return o; }));
     draw();
-    return el('div', {},
+    return el('div', { class: 'stack' },
       el('div', { class: 'row' }, profileSel,
         el('button', { class: 'btn small', type: 'button', onclick: async () => {
           const name = await ask('Shortcut set for an app', 'App name as macOS shows it (e.g. Pixelmator Pro)');
@@ -1026,6 +1110,7 @@ const settingsPanel = {
       el('h4', {}, 'Handwriting to text'),
       el('label', { class: 'field' }, el('span', {}, 'Engine'), mode),
       el('label', { class: 'field' }, el('span', {}, 'Gemma model (Ollama on this Mac)'), model),
+      el('p', { class: 'hint' }, 'Any language, even mixed on a page: Apple Vision reads English, and when it isn’t sure (as with Telugu, which it can’t read), Gemma reads every word in the script it’s written in. Writing that isn’t in English letters also gets an English translation, so searching “weather” finds “వాతావరణం”. For Telugu, gemma4:31b read every word right in a test; smaller models missed some.'),
       el('p', { class: 'hint' }, `Apple Vision: ${settings.vision ? 'available' : 'not available'} · Ollama: ${settings.gemma_models.length ? `${settings.gemma_models.length} model(s) that read images` : 'not running (start the Ollama app)'}. Nothing leaves this Mac.`),
       el('h4', {}, 'Phone'),
       el('label', { class: 'field' }, el('span', {}, 'Open the pad in'), browser),
