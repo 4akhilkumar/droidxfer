@@ -820,7 +820,7 @@ const textPanel = {
     const modeSel = el('select', { class: 'input' }, [['', `Default (${settings?.hw_mode || 'auto'})`], ['auto', 'Auto: Vision, then Gemma'], ['vision', 'Apple Vision only'], ['gemma', 'Gemma only']].map(([v, l]) => new Option(l, v)));
     this.modeSel = modeSel;
     this.buttons = el('div', { class: 'row' });
-    this.out = el('div', {});
+    this.out = el('div', { class: 'stack' });
     const search = el('input', { class: 'input', type: 'search', placeholder: 'Search your handwriting…', style: { width: '100%' } });
     const hits = el('div', {});
     let t = null;
@@ -976,7 +976,7 @@ const tabletPanel = {
       el('button', { class: 'icon-btn', type: 'button', title: 'Remove', onclick: () => { all[this.profile].splice(i, 1); draw(); } }, svg('close', 16)))));
     const profileSel = el('select', { class: 'input', onchange: () => { this.profile = profileSel.value; draw(); } }, names.map((n) => { const o = new Option(n, n); o.selected = n === this.profile; return o; }));
     draw();
-    return el('div', {},
+    return el('div', { class: 'stack' },
       el('div', { class: 'row' }, profileSel,
         el('button', { class: 'btn small', type: 'button', onclick: async () => {
           const name = await ask('Shortcut set for an app', 'App name as macOS shows it (e.g. Pixelmator Pro)');
