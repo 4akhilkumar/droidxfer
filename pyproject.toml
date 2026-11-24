@@ -19,7 +19,7 @@ dependencies = [
 ]
 
 [project.scripts]
-droidxfer = "droidxfer.cli:app"
+droidxfer = "droidxfer.cli:main"
 
 [dependency-groups]
 dev = [

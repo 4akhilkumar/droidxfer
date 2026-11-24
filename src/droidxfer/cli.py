@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 import functools
 import logging
+import os
 import secrets
+import sys
 import threading
 import webbrowser
 from datetime import datetime
@@ -533,9 +535,6 @@ async def apps_fetch_ratings() -> None:
     console.print(f"Saved {status['community_count']} community ratings.")
 
 
-if __name__ == "__main__":
-    app()
-
 
 # logs ----------------------------------------------------------------------------
 _SEVERITY_STYLE = {"debug": "dim", "info": "", "warning": "yellow", "error": "red", "critical": "bold red"}
@@ -774,3 +773,35 @@ def notes_compact(
     if not yes and not typer.confirm(f"Forget the history of {nb.name!r} older than {older_than:g} days?"):
         raise typer.Exit(1)
     console.print(f"Removed {nb.compact(older_than)} old change(s).")
+
+
+# entry point ---------------------------------------------------------------------
+def _drop_dyld_overrides() -> None:
+    """Restart without DYLD_LIBRARY_PATH / DYLD_FRAMEWORK_PATH on macOS.
+
+    They make Apple's ImageIO load Homebrew's libpng & co. in place of its own, and the first picture Vision or
+    the clipboard decodes then crashes Python ("Python quit unexpectedly"). dyld reads them only at launch, so
+    removing them from os.environ isn't enough: the process has to start again.
+    """
+    if sys.platform != "darwin":
+        return
+    from .core.macbridge import dyld_overrides
+
+    found = dyld_overrides()
+    if not found:
+        return
+    for name in found:
+        os.environ.pop(name, None)
+    script = sys.argv[0]
+    if os.path.isfile(script) and os.access(script, os.X_OK) and not script.endswith(".py"):
+        os.execv(script, sys.argv)  # the `droidxfer` console script
+    os.execv(sys.executable, [sys.executable, "-m", "droidxfer.cli", *sys.argv[1:]])
+
+
+def main() -> None:
+    _drop_dyld_overrides()
+    app()
+
+
+if __name__ == "__main__":
+    main()

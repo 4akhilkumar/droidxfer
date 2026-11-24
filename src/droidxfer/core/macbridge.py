@@ -23,6 +23,17 @@ class MacBridgeError(RuntimeError):
     """A macOS feature isn't available or failed (missing permission, cancelled, not a Mac...)."""
 
 
+# dyld search-path overrides. With e.g. DYLD_LIBRARY_PATH=/opt/homebrew/lib, ImageIO's private libPng/libGIF/
+# libJPEG/libTIFF resolve (case-insensitively) to Homebrew's libpng/libgif/libjpeg/libtiff instead, and the first
+# PNG that Vision or AppKit decodes kills the process with SIGBUS (EXC_ARM_DA_ALIGN at 0xbad4007).
+DYLD_OVERRIDES = ("DYLD_LIBRARY_PATH", "DYLD_FRAMEWORK_PATH")
+
+
+def dyld_overrides() -> list[str]:
+    """The dyld override variables set in this process's environment (they only take effect at launch)."""
+    return [name for name in DYLD_OVERRIDES if os.environ.get(name)]
+
+
 def _quartz():
     try:
         import Quartz  # type: ignore[import-not-found]
@@ -103,7 +114,7 @@ def vision_available() -> bool:
         import Vision  # type: ignore[import-not-found]  # noqa: F401
     except ImportError:
         return False
-    return sys.platform == "darwin"
+    return sys.platform == "darwin" and not dyld_overrides()
 
 
 def vision_recognize(png: bytes, languages: list[str] | None = None) -> list[TextLine]:
@@ -113,7 +124,9 @@ def vision_recognize(png: bytes, languages: list[str] | None = None) -> list[Tex
         from Foundation import NSData  # type: ignore[import-not-found]
     except ImportError as exc:
         raise MacBridgeError("Apple Vision isn't available (needs macOS and pyobjc-framework-Vision)") from exc
-    data = NSData.dataWithBytes_length_(png, len(png))
+    if found := dyld_overrides():  # Vision would crash the whole process, not raise
+        raise MacBridgeError(f"Apple Vision can't run with {', '.join(found)} set: unset it and restart droidxfer")
+    data =NSData.dataWithBytes_length_(png, len(png))
     handler = Vision.VNImageRequestHandler.alloc().initWithData_options_(data, None)
     request = Vision.VNRecognizeTextRequest.alloc().init()
     request.setRecognitionLevel_(Vision.VNRequestTextRecognitionLevelAccurate)
