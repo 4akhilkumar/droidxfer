@@ -49,6 +49,7 @@ const macSource = {
   fileUrl: (path) => `/api/local/file?${qs({ path })}`,
   previewUrl: (path) => `/api/local/preview?${qs({ path })}`,
   storage: (path) => api.get(`/api/local/storage?${qs({ path })}`),
+  annotate: (path) => api.post('/api/pen/annotate', { source: 'mac', path }),
   home: () => state.home,
   places: () => [
     ...[['Home', ''], ['Desktop', '/Desktop'], ['Documents', '/Documents'], ['Downloads', '/Downloads'],
@@ -93,6 +94,7 @@ const androidSource = {
   thumbUrl: (path) => `${devUrl('thumb')}?${qs({ path })}`,
   fileUrl: (path) => `${devUrl('file')}?${qs({ path })}`,
   previewUrl: (path) => `${devUrl('preview')}?${qs({ path })}`,
+  annotate: (path) => api.post('/api/pen/annotate', { source: 'android', path, device_id: state.deviceId }),
   home: () => '/sdcard',
   places: () =>
     [['Internal storage', '/sdcard'], ['Camera', '/sdcard/DCIM/Camera'], ['Pictures', '/sdcard/Pictures'],
@@ -350,6 +352,7 @@ async function init() {
     appsDialog ??= new AppsDialog();
     appsDialog.open(currentDevice());
   });
+  $('#btn-pen').addEventListener('click', () => window.open('/pen', 'droidxfer-pen'));
   $('#btn-logs').addEventListener('click', () => {
     logsDialog ??= new LogsDialog();
     logsDialog.open(currentDevice());

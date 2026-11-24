@@ -15,6 +15,7 @@ from .apps import AppManager
 from .localfs import VOLUMES, LocalFS
 from .logs import LogReader
 from .mtpdevices import MtpManager
+from .penpad import PenHub
 from .remotefs import RemoteFS
 from .thumbs import ThumbnailService
 from .transfer import TransferEngine
@@ -49,6 +50,7 @@ class AppContext:
         self.apps = AppManager(self.remote, self.devices, self.catalog)
         self.logs = LogReader(self.remote)
         self.uploads_dir = cache_dir() / "uploads"
+        self.pen = PenHub(self.client, self.devices, self.bus, engine=self.engine, remote=self.remote, local=self.local)
 
     async def start(self, *, track: bool = True) -> None:
         shutil.rmtree(self.uploads_dir, ignore_errors=True)
@@ -63,8 +65,11 @@ class AppContext:
                 if not self.config.settings.mtp:
                     raise
         await self.mtp.start(poll=track)
+        self.pen.indexer_enabled = track
+        await self.pen.start()
 
     async def stop(self) -> None:
+        await self.pen.stop()
         await self.engine.shutdown()
         await self.wireless.stop()
         await self.mtp.stop()
