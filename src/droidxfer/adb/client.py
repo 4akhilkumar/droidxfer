@@ -216,6 +216,23 @@ class AdbClient:
     async def sync(self, serial: str, features: set[str] | frozenset[str] = frozenset()) -> SyncConnection:
         return SyncConnection(await self.open_service(serial, "sync:"), features)
 
+    async def _reverse(self, serial: str, service: str) -> str:
+        """Run a `reverse:` service; adbd answers OKAY (opened) then OKAY/FAIL (result) + optional text."""
+
+        async def run() -> str:
+            async with await self.open_service(serial, service) as s:
+                await s.read_status()
+                return (await s.read_all()).decode("utf-8", "replace")
+
+        return await asyncio.wait_for(run(), 15.0)
+
+    async def reverse(self, serial: str, remote: str, local: str) -> None:
+        """Make `remote` on the phone (e.g. tcp:8765) connect to `local` on this Mac (adb reverse)."""
+        await self._reverse(serial, f"reverse:forward:{remote};{local}")
+
+    async def reverse_remove(self, serial: str, remote: str) -> None:
+        await self._reverse(serial, f"reverse:killforward:{remote}")
+
     async def tcpip(self, serial: str, port: int = 5555) -> str:
         async with await self.open_service(serial, f"tcpip:{port}") as s:
             return (await s.read_all()).decode("utf-8", "replace").strip()
